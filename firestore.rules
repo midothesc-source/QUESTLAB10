@@ -1,0 +1,464 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Pillar 1 / Global Safety Net: Default deny all reads and writes.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Shared Primitives ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isAdmin() {
+      return isVerifiedUser() && (
+        request.auth.token.email == 'midothesc@gmail.com' ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function isTeacher() {
+      return isVerifiedUser() && (
+        isAdmin() ||
+        exists(/databases/$(database)/documents/teachers/$(request.auth.uid))
+      );
+    }
+
+    // --- Validation Helpers ---
+    function isValidUserProfile(data) {
+      return data.keys().hasAll(['uid', 'displayName', 'email', 'role', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'displayName', 'email', 'role', 'gradeBand', 'bio', 'createdAt', 'updatedAt'])
+        && isValidId(data.uid)
+        && data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 80
+        && data.email is string && data.email.size() >= 3 && data.email.size() <= 160
+        && data.role in ['student', 'teacher']
+        && (!('gradeBand' in data) || (data.gradeBand is string && data.gradeBand.size() <= 40))
+        && (!('bio' in data) || (data.bio is string && data.bio.size() <= 300))
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidRoleGrant(data) {
+      return data.keys().hasAll(['uid', 'grantedAt'])
+        && data.keys().hasOnly(['uid', 'email', 'grantedAt', 'grantedBy'])
+        && isValidId(data.uid)
+        && (!('email' in data) || (data.email is string && data.email.size() <= 160))
+        && (!('grantedBy' in data) || (data.grantedBy is string && data.grantedBy.size() <= 128))
+        && data.grantedAt is timestamp;
+    }
+
+    function isValidMission(data) {
+      return data.keys().hasAll([
+          'id', 'worldId', 'title', 'subject', 'topic', 'summary',
+          'estimatedMinutes', 'xpPerCorrect', 'xpPerIncorrect',
+          'objectives', 'questions', 'teacherId', 'status', 'authorType',
+          'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'worldId', 'title', 'subject', 'topic', 'gradeLevel', 'difficulty',
+          'summary', 'estimatedMinutes', 'xpPerCorrect', 'xpPerIncorrect',
+          'objectives', 'questions', 'teacherId', 'status', 'authorType',
+          'imageSrc', 'imageAlt', 'createdAt', 'updatedAt'
+        ])
+        && isValidId(data.id)
+        && data.worldId in ['english', 'mathematics', 'science', 'business']
+        && data.title is string && data.title.size() >= 2 && data.title.size() <= 120
+        && data.subject is string && data.subject.size() >= 2 && data.subject.size() <= 60
+        && data.topic is string && data.topic.size() >= 2 && data.topic.size() <= 120
+        && (!('gradeLevel' in data) || (data.gradeLevel is string && data.gradeLevel.size() <= 40))
+        && (!('difficulty' in data) || data.difficulty in ['Foundational', 'Intermediate', 'Advanced'])
+        && data.summary is string && data.summary.size() >= 10 && data.summary.size() <= 600
+        && data.estimatedMinutes is int && data.estimatedMinutes >= 1 && data.estimatedMinutes <= 120
+        && data.xpPerCorrect is int && data.xpPerCorrect >= 1 && data.xpPerCorrect <= 200
+        && data.xpPerIncorrect is int && data.xpPerIncorrect >= 0 && data.xpPerIncorrect <= 50
+        && data.objectives is list && data.objectives.size() >= 1 && data.objectives.size() <= 8
+        && data.objectives[0] is string
+        && data.questions is list && data.questions.size() >= 1 && data.questions.size() <= 12
+        && data.questions[0] is map
+        && isValidId(data.teacherId)
+        && data.status in ['draft', 'published']
+        && data.authorType in ['curated', 'ai_generated', 'teacher_created']
+        && (!('imageSrc' in data) || (data.imageSrc is string && data.imageSrc.size() <= 240))
+        && (!('imageAlt' in data) || (data.imageAlt is string && data.imageAlt.size() <= 240))
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidPrivateKey(data) {
+      return data.keys().hasAll(['missionId', 'teacherId', 'answers', 'updatedAt'])
+        && data.keys().hasOnly(['missionId', 'teacherId', 'answers', 'updatedAt'])
+        && isValidId(data.missionId)
+        && isValidId(data.teacherId)
+        && data.answers is map
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidClassRoom(data) {
+      return data.keys().hasAll(['id', 'name', 'teacherId', 'createdAt'])
+        && data.keys().hasOnly(['id', 'name', 'subject', 'gradeLevel', 'teacherId', 'createdAt'])
+        && isValidId(data.id)
+        && data.name is string && data.name.size() >= 2 && data.name.size() <= 100
+        && (!('subject' in data) || (data.subject is string && data.subject.size() <= 60))
+        && (!('gradeLevel' in data) || (data.gradeLevel is string && data.gradeLevel.size() <= 40))
+        && isValidId(data.teacherId)
+        && data.createdAt is timestamp;
+    }
+
+    function isValidEnrollment(data) {
+      return data.keys().hasAll([
+          'id', 'classId', 'className', 'teacherId',
+          'studentUid', 'studentName', 'studentEmail', 'joinedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'classId', 'className', 'teacherId',
+          'studentUid', 'studentName', 'studentEmail', 'joinedAt'
+        ])
+        && isValidId(data.id)
+        && isValidId(data.classId)
+        && data.className is string && data.className.size() >= 1 && data.className.size() <= 100
+        && isValidId(data.teacherId)
+        && isValidId(data.studentUid)
+        && data.studentName is string && data.studentName.size() >= 1 && data.studentName.size() <= 80
+        && data.studentEmail is string && data.studentEmail.size() >= 3 && data.studentEmail.size() <= 160
+        && data.joinedAt is timestamp;
+    }
+
+    function isValidAssignment(data) {
+      return data.keys().hasAll([
+          'id', 'missionId', 'missionTitle', 'worldId',
+          'classId', 'className', 'teacherId', 'studentUid', 'status', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'missionId', 'missionTitle', 'worldId',
+          'classId', 'className', 'teacherId', 'studentUid',
+          'dueDate', 'status', 'createdAt', 'updatedAt'
+        ])
+        && isValidId(data.id)
+        && isValidId(data.missionId)
+        && data.missionTitle is string && data.missionTitle.size() >= 1 && data.missionTitle.size() <= 120
+        && data.worldId in ['english', 'mathematics', 'science', 'business']
+        && isValidId(data.classId)
+        && data.className is string && data.className.size() >= 1 && data.className.size() <= 100
+        && isValidId(data.teacherId)
+        && isValidId(data.studentUid)
+        && (!('dueDate' in data) || (data.dueDate is string && data.dueDate.size() <= 40))
+        && data.status in ['assigned', 'completed']
+        && data.createdAt is timestamp
+        && (!('updatedAt' in data) || data.updatedAt is timestamp);
+    }
+
+    function isValidProgress(data) {
+      return data.keys().hasAll([
+          'schemaVersion', 'learnerId', 'displayName', 'totalXp', 'level',
+          'currentStreak', 'bestStreak', 'completedMissionIds',
+          'missionRecords', 'unlockedAchievementIds', 'analytics', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'schemaVersion', 'learnerId', 'displayName', 'totalXp', 'level',
+          'currentStreak', 'bestStreak', 'completedMissionIds',
+          'missionRecords', 'unlockedAchievementIds', 'analytics', 'updatedAt'
+        ])
+        && data.schemaVersion is int && data.schemaVersion >= 1 && data.schemaVersion <= 10
+        && isValidId(data.learnerId)
+        && data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 80
+        && data.totalXp is int && data.totalXp >= 0 && data.totalXp <= 1000000
+        && data.level is int && data.level >= 1 && data.level <= 1000
+        && data.currentStreak is int && data.currentStreak >= 0 && data.currentStreak <= 10000
+        && data.bestStreak is int && data.bestStreak >= 0 && data.bestStreak <= 10000
+        && data.completedMissionIds is list && data.completedMissionIds.size() <= 500
+        && data.missionRecords is map
+        && data.unlockedAchievementIds is list && data.unlockedAchievementIds.size() <= 200
+        && data.analytics is map
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidSubmission(data) {
+      return data.keys().hasAll([
+          'id', 'studentUid', 'studentName', 'missionId', 'missionTitle',
+          'worldId', 'correctCount', 'totalQuestions',
+          'xpEarnedInRun', 'xpAddedToProfile', 'completedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'studentUid', 'studentName', 'missionId', 'missionTitle',
+          'worldId', 'topic', 'teacherId', 'correctCount', 'totalQuestions',
+          'xpEarnedInRun', 'xpAddedToProfile', 'bestStreakInRun', 'completedAt'
+        ])
+        && isValidId(data.id)
+        && isValidId(data.studentUid)
+        && data.studentName is string && data.studentName.size() >= 1 && data.studentName.size() <= 80
+        && isValidId(data.missionId)
+        && data.missionTitle is string && data.missionTitle.size() >= 1 && data.missionTitle.size() <= 120
+        && data.worldId in ['english', 'mathematics', 'science', 'business']
+        && (!('topic' in data) || (data.topic is string && data.topic.size() <= 120))
+        && (!('teacherId' in data) || isValidId(data.teacherId))
+        && data.correctCount is int && data.correctCount >= 0 && data.correctCount <= 20
+        && data.totalQuestions is int && data.totalQuestions >= 1 && data.totalQuestions <= 20
+        && data.xpEarnedInRun is int && data.xpEarnedInRun >= 0 && data.xpEarnedInRun <= 2000
+        && data.xpAddedToProfile is int && data.xpAddedToProfile >= 0 && data.xpAddedToProfile <= 2000
+        && (!('bestStreakInRun' in data) || (data.bestStreakInRun is int && data.bestStreakInRun >= 0 && data.bestStreakInRun <= 20))
+        && data.completedAt is timestamp;
+    }
+
+    // --- Collection Rules ---
+
+    // User Profiles (PII isolated to owner or admin)
+    match /users/{userId} {
+      allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow create: if isValidId(userId)
+        && isOwner(userId)
+        && isValidUserProfile(incoming())
+        && incoming().uid == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && (incoming().role == 'student' || isAdmin());
+      allow update: if isValidId(userId)
+        && isValidUserProfile(incoming())
+        && incoming().uid == existing().uid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin() ||
+          (
+            isOwner(userId)
+            && incoming().role == existing().role
+            && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'gradeBand', 'bio', 'updatedAt'])
+          )
+        );
+
+      // Learner Progress subcollection
+      match /progress/{progressId} {
+        allow get: if isValidId(userId) && isValidId(progressId) && (isOwner(userId) || isAdmin());
+        allow create: if isValidId(userId) && isValidId(progressId)
+          && progressId == 'current'
+          && isOwner(userId)
+          && isValidProgress(incoming())
+          && incoming().learnerId == request.auth.uid
+          && incoming().updatedAt == request.time;
+        allow update: if isValidId(userId) && isValidId(progressId)
+          && progressId == 'current'
+          && isValidProgress(incoming())
+          && incoming().learnerId == existing().learnerId
+          && incoming().updatedAt == request.time
+          && (
+            isAdmin() ||
+            (
+              isOwner(userId)
+              && incoming().diff(existing()).affectedKeys().hasOnly([
+                'displayName', 'totalXp', 'level', 'currentStreak', 'bestStreak',
+                'completedMissionIds', 'missionRecords', 'unlockedAchievementIds',
+                'analytics', 'updatedAt'
+              ])
+            )
+          );
+      }
+    }
+
+    // Trusted Teacher & Admin role registries (never writable by students)
+    match /teachers/{userId} {
+      allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow list: if isAdmin();
+      allow create, update: if isValidId(userId) && isAdmin() && isValidRoleGrant(incoming()) && incoming().grantedAt == request.time;
+      allow delete: if isValidId(userId) && isAdmin();
+    }
+
+    match /admins/{userId} {
+      allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow create, update, delete: if isValidId(userId) && isAdmin();
+    }
+
+    // Missions (student-facing documents contain no secret answer key when stored separately)
+    match /missions/{missionId} {
+      allow get: if isValidId(missionId) && isSignedIn() && (
+        existing().status == 'published' ||
+        existing().teacherId == request.auth.uid ||
+        isAdmin()
+      );
+      allow list: if isSignedIn() && (
+        resource.data.status == 'published' ||
+        resource.data.teacherId == request.auth.uid ||
+        isAdmin()
+      );
+      allow create: if isValidId(missionId)
+        && isTeacher()
+        && isValidMission(incoming())
+        && incoming().id == missionId
+        && incoming().teacherId == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(missionId)
+        && isTeacher()
+        && isValidMission(incoming())
+        && incoming().id == existing().id
+        && incoming().teacherId == existing().teacherId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (isAdmin() || existing().teacherId == request.auth.uid)
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'worldId', 'title', 'subject', 'topic', 'gradeLevel', 'difficulty',
+          'summary', 'estimatedMinutes', 'xpPerCorrect', 'xpPerIncorrect',
+          'objectives', 'questions', 'status', 'imageSrc', 'imageAlt', 'updatedAt'
+        ]);
+      allow delete: if isValidId(missionId) && isTeacher() && (isAdmin() || existing().teacherId == request.auth.uid);
+
+      // Teacher-only private answer keys for drafted/published missions
+      match /private/{docId} {
+        allow get: if isValidId(missionId) && isValidId(docId) && isTeacher() && (
+          isAdmin() ||
+          get(/databases/$(database)/documents/missions/$(missionId)).data.teacherId == request.auth.uid
+        );
+        allow create, update: if isValidId(missionId) && isValidId(docId)
+          && docId == 'answerKey'
+          && isTeacher()
+          && isValidPrivateKey(incoming())
+          && incoming().missionId == missionId
+          && incoming().updatedAt == request.time
+          && (
+            isAdmin() ||
+            (
+              incoming().teacherId == request.auth.uid &&
+              get(/databases/$(database)/documents/missions/$(missionId)).data.teacherId == request.auth.uid
+            )
+          );
+        allow delete: if isValidId(missionId) && isValidId(docId) && isTeacher() && (
+          isAdmin() ||
+          get(/databases/$(database)/documents/missions/$(missionId)).data.teacherId == request.auth.uid
+        );
+      }
+    }
+
+    // Server-only answer keys (inaccessible to client SDKs)
+    match /missionAnswerKeys/{missionId} {
+      allow read, write: if false;
+    }
+
+    // Classes (teacher-owned; students can read a single class when joining by class code)
+    match /classes/{classId} {
+      allow get: if isValidId(classId) && isSignedIn();
+      allow list: if isSignedIn() && (resource.data.teacherId == request.auth.uid || isAdmin());
+      allow create: if isValidId(classId)
+        && isTeacher()
+        && isValidClassRoom(incoming())
+        && incoming().id == classId
+        && incoming().teacherId == request.auth.uid
+        && incoming().createdAt == request.time;
+      allow update: if isValidId(classId)
+        && isTeacher()
+        && isValidClassRoom(incoming())
+        && incoming().id == existing().id
+        && incoming().teacherId == existing().teacherId
+        && incoming().createdAt == existing().createdAt
+        && (isAdmin() || existing().teacherId == request.auth.uid)
+        && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'subject', 'gradeLevel']);
+      allow delete: if isValidId(classId) && isTeacher() && (isAdmin() || existing().teacherId == request.auth.uid);
+    }
+
+    // Class Enrollments (normalized relational link between student and teacher class)
+    match /enrollments/{enrollmentId} {
+      allow get: if isValidId(enrollmentId) && isSignedIn() && (
+        existing().studentUid == request.auth.uid ||
+        existing().teacherId == request.auth.uid ||
+        isAdmin()
+      );
+      allow list: if isSignedIn() && (
+        resource.data.studentUid == request.auth.uid ||
+        resource.data.teacherId == request.auth.uid ||
+        isAdmin()
+      );
+      allow create: if isValidId(enrollmentId)
+        && isSignedIn()
+        && isValidEnrollment(incoming())
+        && incoming().id == enrollmentId
+        && incoming().joinedAt == request.time
+        && exists(/databases/$(database)/documents/classes/$(incoming().classId))
+        && get(/databases/$(database)/documents/classes/$(incoming().classId)).data.teacherId == incoming().teacherId
+        && (
+          isAdmin() ||
+          (isTeacher() && incoming().teacherId == request.auth.uid) ||
+          incoming().studentUid == request.auth.uid
+        );
+      allow delete: if isValidId(enrollmentId) && isSignedIn() && (
+        isAdmin() ||
+        existing().teacherId == request.auth.uid ||
+        existing().studentUid == request.auth.uid
+      );
+    }
+
+    // Mission Assignments
+    match /assignments/{assignmentId} {
+      allow get: if isValidId(assignmentId) && isSignedIn() && (
+        existing().studentUid == request.auth.uid ||
+        existing().teacherId == request.auth.uid ||
+        isAdmin()
+      );
+      allow list: if isSignedIn() && (
+        resource.data.studentUid == request.auth.uid ||
+        resource.data.teacherId == request.auth.uid ||
+        isAdmin()
+      );
+      allow create: if isValidId(assignmentId)
+        && isTeacher()
+        && isValidAssignment(incoming())
+        && incoming().id == assignmentId
+        && incoming().teacherId == request.auth.uid
+        && incoming().createdAt == request.time
+        && exists(/databases/$(database)/documents/classes/$(incoming().classId))
+        && get(/databases/$(database)/documents/classes/$(incoming().classId)).data.teacherId == request.auth.uid;
+      allow update: if isValidId(assignmentId)
+        && isSignedIn()
+        && isValidAssignment(incoming())
+        && incoming().id == existing().id
+        && incoming().missionId == existing().missionId
+        && incoming().classId == existing().classId
+        && incoming().teacherId == existing().teacherId
+        && incoming().studentUid == existing().studentUid
+        && incoming().createdAt == existing().createdAt
+        && (
+          isAdmin() ||
+          (isTeacher() && existing().teacherId == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly(['dueDate', 'status', 'updatedAt'])) ||
+          (existing().studentUid == request.auth.uid && existing().status == 'assigned' && incoming().status == 'completed' && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']))
+        );
+      allow delete: if isValidId(assignmentId) && isTeacher() && (isAdmin() || existing().teacherId == request.auth.uid);
+    }
+
+    // Mission Submissions / Learning History (teacher-readable for missions/classes they own)
+    match /submissions/{submissionId} {
+      allow get: if isValidId(submissionId) && isSignedIn() && (
+        existing().studentUid == request.auth.uid ||
+        existing().teacherId == request.auth.uid ||
+        isAdmin()
+      );
+      allow list: if isSignedIn() && (
+        resource.data.studentUid == request.auth.uid ||
+        resource.data.teacherId == request.auth.uid ||
+        isAdmin()
+      );
+      allow create: if isValidId(submissionId)
+        && isSignedIn()
+        && isValidSubmission(incoming())
+        && incoming().id == submissionId
+        && incoming().studentUid == request.auth.uid
+        && incoming().completedAt == request.time;
+    }
+  }
+}

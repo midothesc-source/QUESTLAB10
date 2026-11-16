@@ -1,12 +1,12 @@
 import { useState } from 'react';
-import { ArrowRight, CheckCircle2, Lock, Unlock } from 'lucide-react';
-import { MISSIONS } from '../data/missions';
+import { ArrowRight, CheckCircle2, Lock, Sparkles, Unlock } from 'lucide-react';
 import { SUBJECT_WORLDS } from '../data/worlds';
-import type { LearnerProgressState } from '../types/questlab';
+import type { LearnerProgressState, MissionDefinition } from '../types/questlab';
 import { ResilientImage } from './ResilientImage';
 
 interface MissionSelectionViewProps {
   progress: LearnerProgressState;
+  missions: MissionDefinition[];
   onSelectMission: (missionId: string) => void;
   onBackToDashboard: () => void;
 }
@@ -15,14 +15,25 @@ type WorldFilter = 'all' | 'unlocked' | 'locked';
 
 export function MissionSelectionView({
   progress,
+  missions,
   onSelectMission,
   onBackToDashboard,
 }: MissionSelectionViewProps) {
   const [filter, setFilter] = useState<WorldFilter>('all');
 
-  const visibleWorlds = SUBJECT_WORLDS.filter((world) => {
+  const computedWorlds = SUBJECT_WORLDS.map((world) => {
+    const worldMissions = missions.filter((m) => m.worldId === world.id);
+    const isUnlocked = world.status === 'unlocked' || worldMissions.length > 0;
+    return {
+      world,
+      worldMissions,
+      isUnlocked,
+    };
+  });
+
+  const visibleWorlds = computedWorlds.filter((entry) => {
     if (filter === 'all') return true;
-    return world.status === filter;
+    return filter === 'unlocked' ? entry.isUnlocked : !entry.isUnlocked;
   });
 
   return (
@@ -34,8 +45,8 @@ export function MissionSelectionView({
             Subject Worlds
           </h1>
           <p className="mt-1.5 max-w-2xl text-sm text-slate-300">
-            Select an unlocked sector to review its mission briefing. Additional worlds unlock as
-            new curriculum sectors open.
+            Select any available world to inspect its briefing and launch a mission. Sectors without
+            published educator missions remain locked.
           </p>
         </div>
 
@@ -79,17 +90,7 @@ export function MissionSelectionView({
       </div>
 
       <div className="mt-8 grid gap-6 md:grid-cols-2">
-        {visibleWorlds.map((world) => {
-          const isUnlocked = world.status === 'unlocked';
-          const worldMissions = MISSIONS.filter((m) => world.missionIds.includes(m.id));
-          const primaryMission = worldMissions[0];
-          const missionRecord = primaryMission
-            ? progress.missionRecords[primaryMission.id]
-            : undefined;
-          const isCompleted = primaryMission
-            ? progress.completedMissionIds.includes(primaryMission.id)
-            : false;
-
+        {visibleWorlds.map(({ world, worldMissions, isUnlocked }) => {
           return (
             <article
               key={world.id}
@@ -120,7 +121,9 @@ export function MissionSelectionView({
                     ) : (
                       <Lock className="h-3.5 w-3.5" aria-hidden="true" />
                     )}
-                    {isUnlocked ? 'Unlocked' : 'Locked'}
+                    {isUnlocked
+                      ? `${worldMissions.length} Mission${worldMissions.length === 1 ? '' : 's'}`
+                      : 'Locked'}
                   </span>
                 </div>
               </div>
@@ -134,36 +137,49 @@ export function MissionSelectionView({
                   </p>
                 </div>
 
-                {isUnlocked && primaryMission ? (
-                  <div className="mt-6 border-t border-slate-400/15 pt-5">
-                    <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-300">
-                      <span className="font-semibold text-white">{primaryMission.title}</span>
-                      {isCompleted && missionRecord ? (
-                        <span className="inline-flex items-center gap-1 text-emerald-300 font-mono-tabular">
-                          <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
-                          Best {missionRecord.bestScore}/{primaryMission.questions.length} ·{' '}
-                          {missionRecord.xpAwarded} XP
-                        </span>
-                      ) : (
-                        <span className="font-mono-tabular text-slate-400">
-                          {primaryMission.questions.length} Qs · ~{primaryMission.estimatedMinutes}{' '}
-                          min
-                        </span>
-                      )}
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={() => onSelectMission(primaryMission.id)}
-                      className="mt-4 inline-flex min-h-[44px] w-full items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-[#55D9F5] px-5 py-2.5 text-sm font-semibold text-[#06111D] transition-colors hover:bg-[#7DE4FA] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#55D9F5]"
-                    >
-                      <span>
-                        {isCompleted
-                          ? `Replay ${primaryMission.title}`
-                          : `Enter ${primaryMission.title}`}
-                      </span>
-                      <ArrowRight className="h-4 w-4" aria-hidden="true" />
-                    </button>
+                {isUnlocked && worldMissions.length > 0 ? (
+                  <div className="mt-6 space-y-3 border-t border-slate-400/15 pt-5">
+                    {worldMissions.map((mission) => {
+                      const missionRecord = progress.missionRecords[mission.id];
+                      const isCompleted = progress.completedMissionIds.includes(mission.id);
+                      return (
+                        <div
+                          key={mission.id}
+                          className="rounded-xl border border-slate-400/15 bg-[#080D19]/75 p-3.5"
+                        >
+                          <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-300">
+                            <span className="inline-flex items-center gap-1.5 font-semibold text-white">
+                              {mission.authorType === 'ai_generated' && (
+                                <Sparkles className="h-3.5 w-3.5 text-[#A68AFF]" aria-hidden="true" />
+                              )}
+                              <span>{mission.title}</span>
+                            </span>
+                            {isCompleted && missionRecord ? (
+                              <span className="font-mono-tabular inline-flex items-center gap-1 text-emerald-300">
+                                <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
+                                Best {missionRecord.bestScore}/{mission.questions.length} ·{' '}
+                                {missionRecord.xpAwarded} XP
+                              </span>
+                            ) : (
+                              <span className="font-mono-tabular text-slate-400">
+                                {mission.questions.length} Qs · ~{mission.estimatedMinutes} min
+                              </span>
+                            )}
+                          </div>
+                          <p className="mt-1 text-xs text-slate-400">{mission.topic}</p>
+                          <button
+                            type="button"
+                            onClick={() => onSelectMission(mission.id)}
+                            className="mt-3 inline-flex min-h-[40px] w-full items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-[#55D9F5] px-4 py-2 text-xs font-semibold text-[#06111D] transition-colors hover:bg-[#7DE4FA] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#55D9F5]"
+                          >
+                            <span>
+                              {isCompleted ? `Replay ${mission.title}` : `Enter ${mission.title}`}
+                            </span>
+                            <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
+                          </button>
+                        </div>
+                      );
+                    })}
                   </div>
                 ) : (
                   <div className="mt-6 border-t border-slate-400/10 pt-5">

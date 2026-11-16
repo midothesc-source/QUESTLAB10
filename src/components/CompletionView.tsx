@@ -10,6 +10,7 @@ interface CompletionViewProps {
   mission: MissionDefinition;
   summary: MissionRunSummary;
   progress: LearnerProgressState;
+  isAuthenticated: boolean;
   onReplayMission: () => void;
   onReturnToDashboard: () => void;
   onOpenWorlds: () => void;
@@ -19,6 +20,7 @@ export function CompletionView({
   mission,
   summary,
   progress,
+  isAuthenticated,
   onReplayMission,
   onReturnToDashboard,
   onOpenWorlds,
@@ -29,7 +31,12 @@ export function CompletionView({
   return (
     <div className="mx-auto max-w-4xl px-4 py-8 sm:px-6 lg:py-12">
       <section className="ql-panel-accent rounded-2xl p-6 sm:p-8">
-        <p className="text-sm font-medium tracking-wide text-[#55D9F5]">Mission Complete</p>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-sm font-medium tracking-wide text-[#55D9F5]">Mission Complete</p>
+          <span className="font-mono-tabular text-xs text-slate-400">
+            {isAuthenticated ? 'Cloud Synced' : 'Saved Locally'}
+          </span>
+        </div>
         <h1 className="font-display mt-2 text-3xl font-bold tracking-tight text-white">
           {mission.title}
         </h1>
@@ -51,7 +58,7 @@ export function CompletionView({
             >
               {summary.correctCount} / {summary.totalQuestions}
             </p>
-            <p className="mt-1 text-xs text-slate-400 font-mono-tabular">
+            <p className="font-mono-tabular mt-1 text-xs text-slate-400">
               {accuracyPercent}% Accuracy
             </p>
           </div>
@@ -64,7 +71,7 @@ export function CompletionView({
             >
               +{summary.xpAddedToProfile} XP
             </p>
-            <p className="mt-1 text-xs text-slate-400 font-mono-tabular">
+            <p className="font-mono-tabular mt-1 text-xs text-slate-400">
               {summary.isReplayPractice
                 ? `Practice replay · ${summary.xpEarnedInRun} XP run (best ${summary.previousBestXp} XP claimed)`
                 : `Run total: ${summary.xpEarnedInRun} XP`}
@@ -77,7 +84,7 @@ export function CompletionView({
               <Flame className="h-5 w-5 text-[#A68AFF]" aria-hidden="true" />
               <span>{summary.bestStreakInRun}</span>
             </p>
-            <p className="mt-1 text-xs text-slate-400 font-mono-tabular">
+            <p className="font-mono-tabular mt-1 text-xs text-slate-400">
               All-time best: {progress.bestStreak}
             </p>
           </div>
@@ -136,25 +143,30 @@ export function CompletionView({
             {mission.questions.map((question, idx) => {
               const entry = summary.questionResults[idx];
               const isCorrect = entry?.isCorrect ?? false;
+              const explanation = entry?.explanation || question.explanation;
               return (
-                <li
-                  key={question.id}
-                  className="flex flex-col justify-between gap-2 py-3 sm:flex-row sm:items-center"
-                >
-                  <div className="flex items-center gap-3">
-                    {isCorrect ? (
-                      <CheckCircle2
-                        className="h-4 w-4 shrink-0 text-emerald-300"
-                        aria-hidden="true"
-                      />
-                    ) : (
-                      <XCircle className="h-4 w-4 shrink-0 text-amber-300" aria-hidden="true" />
-                    )}
-                    <span className="text-sm text-slate-200">{question.promptSentence}</span>
+                <li key={question.id} className="py-3">
+                  <div className="flex flex-col justify-between gap-2 sm:flex-row sm:items-center">
+                    <div className="flex items-center gap-3">
+                      {isCorrect ? (
+                        <CheckCircle2
+                          className="h-4 w-4 shrink-0 text-emerald-300"
+                          aria-hidden="true"
+                        />
+                      ) : (
+                        <XCircle className="h-4 w-4 shrink-0 text-amber-300" aria-hidden="true" />
+                      )}
+                      <span className="text-sm text-slate-200">{question.promptSentence}</span>
+                    </div>
+                    <span className="font-mono-tabular shrink-0 text-xs font-medium text-[#55D9F5]">
+                      {isCorrect ? 'Correct' : 'Missed'} · +{entry?.xpEarned ?? 0} XP
+                    </span>
                   </div>
-                  <span className="font-mono-tabular shrink-0 text-xs font-medium text-[#55D9F5]">
-                    {isCorrect ? 'Correct' : 'Missed'} · +{entry?.xpEarned ?? 0} XP
-                  </span>
+                  {explanation && (
+                    <p className="mt-1.5 pl-7 text-xs leading-relaxed text-slate-400">
+                      {explanation}
+                    </p>
+                  )}
                 </li>
               );
             })}

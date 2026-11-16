@@ -7,14 +7,19 @@ import {
   HelpCircle,
 } from 'lucide-react';
 import { evaluateQuestionAnswer } from '../engine/progression';
+import { gradeSingleQuestionOnServer } from '../services/apiClient';
 import type { MissionDefinition, QuestionResultEntry } from '../types/questlab';
 
 interface QuizViewProps {
   mission: MissionDefinition;
-  onCompleteMission: (results: QuestionResultEntry[]) => void;
+  isAuthenticated: boolean;
+  onCompleteMission: (results: QuestionResultEntry[]) => void | Promise<void>;
 }
 
 function renderSentenceWithHighlight(sentence: string, phrase: string) {
+  if (!phrase) {
+    return <span>{sentence}</span>;
+  }
   const index = sentence.toLowerCase().indexOf(phrase.toLowerCase());
   if (index === -1) {
     return <span>{sentence}</span>;
@@ -35,10 +40,13 @@ function renderSentenceWithHighlight(sentence: string, phrase: string) {
   );
 }
 
-export function QuizView({ mission, onCompleteMission }: QuizViewProps) {
+export function QuizView({ mission, isAuthenticated, onCompleteMission }: QuizViewProps) {
   const [questionIndex, setQuestionIndex] = useState(0);
   const [selectedOptionId, setSelectedOptionId] = useState<string | null>(null);
   const [isSubmitted, setIsSubmitted] = useState(false);
+  const [checkingAnswer, setCheckingAnswer] = useState(false);
+  const [completingRun, setCompletingRun] = useState(false);
+  const [gradingError, setGradingError] = useState<string | null>(null);
   const [showHint, setShowHint] = useState(false);
   const [runStreak, setRunStreak] = useState(0);
   const [bestRunStreak, setBestRunStreak] = useState(0);
@@ -52,11 +60,70 @@ export function QuizView({ mission, onCompleteMission }: QuizViewProps) {
     ((questionIndex + (isSubmitted ? 1 : 0)) / totalQuestions) * 100,
   );
 
-  const handleCheckAnswer = () => {
-    if (!selectedOptionId || isSubmitted) {
+  const handleCheckAnswer = async () => {
+    if (!selectedOptionId || isSubmitted || checkingAnswer) {
       return;
     }
 
+    setGradingError(null);
+
+    if (isAuthenticated) {
+      setCheckingAnswer(true);
+      try {
+        const graded = await gradeSingleQuestionOnServer(
+          mission.id,
+          currentQuestion.id,
+          selectedOptionId,
+        );
+        const nextStreak = graded.isCorrect ? runStreak + 1 : 0;
+        const nextBest = Math.max(bestRunStreak, nextStreak);
+        const entry: QuestionResultEntry = {
+          questionId: currentQuestion.id,
+          selectedOptionId,
+          isCorrect: graded.isCorrect,
+          xpEarned: graded.xpEarned,
+          correctOptionId: graded.correctOptionId,
+          explanation: graded.explanation,
+        };
+        setRunStreak(nextStreak);
+        setBestRunStreak(nextBest);
+        setResults((prev) => [...prev, entry]);
+        setIsSubmitted(true);
+        return;
+      } catch (err) {
+        // Fallback to local evaluation ONLY if question locally carries curated key (e.g. Grammar Vault offline fallback)
+        if (currentQuestion.correctOptionId) {
+          const outcome = evaluateQuestionAnswer(
+            currentQuestion,
+            selectedOptionId,
+            mission,
+            runStreak,
+            bestRunStreak,
+          );
+          const entry: QuestionResultEntry = {
+            questionId: currentQuestion.id,
+            selectedOptionId,
+            isCorrect: outcome.isCorrect,
+            xpEarned: outcome.xpEarned,
+            correctOptionId: currentQuestion.correctOptionId,
+            explanation: currentQuestion.explanation,
+          };
+          setRunStreak(outcome.nextRunStreak);
+          setBestRunStreak(outcome.nextBestRunStreak);
+          setResults((prev) => [...prev, entry]);
+          setIsSubmitted(true);
+          return;
+        }
+        setGradingError(
+          err instanceof Error ? err.message : 'Unable to verify answer with server.',
+        );
+        return;
+      } finally {
+        setCheckingAnswer(false);
+      }
+    }
+
+    // Guest mode local evaluation
     const outcome = evaluateQuestionAnswer(
       currentQuestion,
       selectedOptionId,
@@ -70,6 +137,8 @@ export function QuizView({ mission, onCompleteMission }: QuizViewProps) {
       selectedOptionId,
       isCorrect: outcome.isCorrect,
       xpEarned: outcome.xpEarned,
+      correctOptionId: currentQuestion.correctOptionId,
+      explanation: currentQuestion.explanation,
     };
 
     setRunStreak(outcome.nextRunStreak);
@@ -78,8 +147,8 @@ export function QuizView({ mission, onCompleteMission }: QuizViewProps) {
     setIsSubmitted(true);
   };
 
-  const handleNextStep = () => {
-    if (!isSubmitted) {
+  const handleNextStep = async () => {
+    if (!isSubmitted || completingRun) {
       return;
     }
 
@@ -88,8 +157,14 @@ export function QuizView({ mission, onCompleteMission }: QuizViewProps) {
       setSelectedOptionId(null);
       setIsSubmitted(false);
       setShowHint(false);
+      setGradingError(null);
     } else {
-      onCompleteMission(results);
+      setCompletingRun(true);
+      try {
+        await onCompleteMission(results);
+      } finally {
+        setCompletingRun(false);
+      }
     }
   };
 
@@ -99,20 +174,25 @@ export function QuizView({ mission, onCompleteMission }: QuizViewProps) {
         return;
       }
 
-      if (!isSubmitted) {
+      if (!isSubmitted && !checkingAnswer) {
         if (event.key === '1' && currentQuestion.options[0]) {
           setSelectedOptionId(currentQuestion.options[0].id);
         } else if (event.key === '2' && currentQuestion.options[1]) {
           setSelectedOptionId(currentQuestion.options[1].id);
         } else if (event.key === '3' && currentQuestion.options[2]) {
           setSelectedOptionId(currentQuestion.options[2].id);
+        } else if (event.key === '4' && currentQuestion.options[3]) {
+          setSelectedOptionId(currentQuestion.options[3].id);
         }
       }
     };
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [currentQuestion.options, isSubmitted]);
+  }, [checkingAnswer, currentQuestion.options, isSubmitted]);
+
+  const revealedCorrectId = currentResult?.correctOptionId || currentQuestion.correctOptionId;
+  const revealedExplanation = currentResult?.explanation || currentQuestion.explanation;
 
   return (
     <div className="mx-auto max-w-4xl px-4 py-6 sm:px-6 lg:py-7">
@@ -131,7 +211,7 @@ export function QuizView({ mission, onCompleteMission }: QuizViewProps) {
           </h1>
         </div>
 
-        <div className="flex items-center gap-5 text-sm font-mono-tabular">
+        <div className="font-mono-tabular flex items-center gap-5 text-sm">
           <div className="text-right">
             <p className="text-xs text-slate-400">Run XP</p>
             <p data-testid="quiz-run-xp" className="font-semibold text-[#55D9F5]">
@@ -166,7 +246,9 @@ export function QuizView({ mission, onCompleteMission }: QuizViewProps) {
 
       {/* Main Question Stage */}
       <section className="ql-panel-accent mt-5 rounded-2xl p-5 sm:p-6">
-        <p className="text-xs font-medium tracking-wide text-slate-400">Sentence Analysis</p>
+        <p className="text-xs font-medium tracking-wide text-slate-400">
+          {mission.subject} Analysis
+        </p>
 
         <blockquote className="mt-2.5 rounded-xl bg-[#080D19]/85 px-4 py-3.5 text-lg leading-relaxed text-white sm:text-xl">
           {renderSentenceWithHighlight(
@@ -180,21 +262,18 @@ export function QuizView({ mission, onCompleteMission }: QuizViewProps) {
         </p>
 
         {/* Answer Choices */}
-        <div
-          role="radiogroup"
-          aria-label="Answer choices"
-          className="mt-3 space-y-2.5"
-        >
+        <div role="radiogroup" aria-label="Answer choices" className="mt-3 space-y-2.5">
           {currentQuestion.options.map((option, idx) => {
             const isSelected = selectedOptionId === option.id;
-            const isCorrectOption = option.id === currentQuestion.correctOptionId;
+            const isCorrectOption = Boolean(revealedCorrectId && option.id === revealedCorrectId);
 
             let borderStyle =
               'border-slate-400/20 bg-[#0D1526]/75 hover:border-[#55D9F5]/50 hover:bg-[#121D36]';
             let keyStyle = 'border-slate-400/30 text-slate-300';
 
             if (!isSubmitted && isSelected) {
-              borderStyle = 'border-[#55D9F5] bg-[#132341] shadow-[0_0_20px_-8px_rgba(85,217,245,0.45)]';
+              borderStyle =
+                'border-[#55D9F5] bg-[#132341] shadow-[0_0_20px_-8px_rgba(85,217,245,0.45)]';
               keyStyle = 'border-[#55D9F5] bg-[#55D9F5] text-[#06111D]';
             } else if (isSubmitted && isCorrectOption) {
               borderStyle = 'border-emerald-400/70 bg-emerald-950/35';
@@ -210,7 +289,7 @@ export function QuizView({ mission, onCompleteMission }: QuizViewProps) {
                 type="button"
                 role="radio"
                 aria-checked={isSelected}
-                disabled={isSubmitted}
+                disabled={isSubmitted || checkingAnswer}
                 onClick={() => setSelectedOptionId(option.id)}
                 className={`flex min-h-[48px] w-full items-center justify-between gap-4 rounded-xl border px-4 py-3 text-left transition-all focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#55D9F5] ${borderStyle} ${
                   isSubmitted ? 'cursor-default' : 'cursor-pointer'
@@ -227,13 +306,22 @@ export function QuizView({ mission, onCompleteMission }: QuizViewProps) {
                   </span>
                 </div>
 
-                <span className="hidden text-xs text-slate-500 font-mono-tabular sm:inline">
+                <span className="font-mono-tabular hidden text-xs text-slate-500 sm:inline">
                   Key {idx + 1}
                 </span>
               </button>
             );
           })}
         </div>
+
+        {gradingError && (
+          <div
+            role="alert"
+            className="mt-4 rounded-xl border border-rose-400/35 bg-rose-950/30 px-4 py-3 text-xs text-rose-200"
+          >
+            {gradingError}
+          </div>
+        )}
 
         {/* Hint & Validation Row */}
         <div className="mt-5 flex flex-wrap items-center justify-between gap-4">
@@ -250,24 +338,29 @@ export function QuizView({ mission, onCompleteMission }: QuizViewProps) {
           {!isSubmitted ? (
             <button
               type="button"
-              disabled={!selectedOptionId}
+              disabled={!selectedOptionId || checkingAnswer}
               onClick={handleCheckAnswer}
               className={`inline-flex min-h-[44px] items-center gap-2 whitespace-nowrap rounded-lg px-6 py-2.5 text-sm font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#55D9F5] ${
-                selectedOptionId
+                selectedOptionId && !checkingAnswer
                   ? 'bg-[#55D9F5] text-[#06111D] hover:bg-[#7DE4FA]'
                   : 'cursor-not-allowed bg-slate-800 text-slate-500'
               }`}
             >
-              <span>Check Answer</span>
+              <span>{checkingAnswer ? 'Verifying...' : 'Check Answer'}</span>
             </button>
           ) : (
             <button
               type="button"
+              disabled={completingRun}
               onClick={handleNextStep}
-              className="inline-flex min-h-[44px] items-center gap-2 whitespace-nowrap rounded-lg bg-[#55D9F5] px-6 py-2.5 text-sm font-semibold text-[#06111D] transition-colors hover:bg-[#7DE4FA] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#55D9F5]"
+              className="inline-flex min-h-[44px] items-center gap-2 whitespace-nowrap rounded-lg bg-[#55D9F5] px-6 py-2.5 text-sm font-semibold text-[#06111D] transition-colors hover:bg-[#7DE4FA] disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#55D9F5]"
             >
               <span>
-                {questionIndex + 1 < totalQuestions ? 'Next Question' : 'Complete Mission'}
+                {completingRun
+                  ? 'Finalizing...'
+                  : questionIndex + 1 < totalQuestions
+                    ? 'Next Question'
+                    : 'Complete Mission'}
               </span>
               <ArrowRight className="h-4 w-4" aria-hidden="true" />
             </button>
@@ -316,9 +409,9 @@ export function QuizView({ mission, onCompleteMission }: QuizViewProps) {
               </span>
             </div>
 
-            <p className="mt-2 text-sm leading-relaxed text-slate-200">
-              {currentQuestion.explanation}
-            </p>
+            {revealedExplanation && (
+              <p className="mt-2 text-sm leading-relaxed text-slate-200">{revealedExplanation}</p>
+            )}
           </div>
         )}
       </section>

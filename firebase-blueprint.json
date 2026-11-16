@@ -1,0 +1,564 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Authenticated learner or teacher profile stored per UID.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "maxLength": 160
+        },
+        "role": {
+          "type": "string",
+          "enum": ["student", "teacher"]
+        },
+        "gradeBand": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "bio": {
+          "type": "string",
+          "maxLength": 300
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "displayName", "email", "role", "createdAt", "updatedAt"]
+    },
+    "RoleGrant": {
+      "title": "RoleGrant",
+      "description": "Trusted server/admin-managed role marker document.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "maxLength": 160
+        },
+        "grantedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "grantedBy": {
+          "type": "string",
+          "maxLength": 128
+        }
+      },
+      "required": ["uid", "grantedAt"]
+    },
+    "Mission": {
+      "title": "Mission",
+      "description": "Public/assigned mission definition without private student-hidden answer keys when stored separately.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "worldId": {
+          "type": "string",
+          "enum": ["english", "mathematics", "science", "business"]
+        },
+        "title": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 120
+        },
+        "subject": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 60
+        },
+        "topic": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 120
+        },
+        "gradeLevel": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40
+        },
+        "difficulty": {
+          "type": "string",
+          "enum": ["Foundational", "Intermediate", "Advanced"]
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 600
+        },
+        "estimatedMinutes": {
+          "type": "integer"
+        },
+        "xpPerCorrect": {
+          "type": "integer"
+        },
+        "xpPerIncorrect": {
+          "type": "integer"
+        },
+        "objectives": {
+          "type": "array"
+        },
+        "questions": {
+          "type": "array"
+        },
+        "teacherId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["draft", "published"]
+        },
+        "authorType": {
+          "type": "string",
+          "enum": ["curated", "ai_generated", "teacher_created"]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "worldId",
+        "title",
+        "subject",
+        "topic",
+        "summary",
+        "estimatedMinutes",
+        "xpPerCorrect",
+        "xpPerIncorrect",
+        "objectives",
+        "questions",
+        "teacherId",
+        "status",
+        "authorType",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "MissionPrivateKey": {
+      "title": "MissionPrivateKey",
+      "description": "Teacher-scoped or server-only answer key map for a mission.",
+      "type": "object",
+      "properties": {
+        "missionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "teacherId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "answers": {
+          "type": "object"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["missionId", "teacherId", "answers", "updatedAt"]
+    },
+    "ClassRoom": {
+      "title": "ClassRoom",
+      "description": "Teacher-owned classroom cohort.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 100
+        },
+        "subject": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 60
+        },
+        "gradeLevel": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "teacherId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["id", "name", "teacherId", "createdAt"]
+    },
+    "ClassEnrollment": {
+      "title": "ClassEnrollment",
+      "description": "Normalized enrollment record linking a student to a teacher class.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "classId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "className": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "teacherId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "studentUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "studentName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "studentEmail": {
+          "type": "string",
+          "format": "email",
+          "maxLength": 160
+        },
+        "joinedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "classId",
+        "className",
+        "teacherId",
+        "studentUid",
+        "studentName",
+        "studentEmail",
+        "joinedAt"
+      ]
+    },
+    "MissionAssignment": {
+      "title": "MissionAssignment",
+      "description": "Mission assignment issued by a teacher to a class or specific student.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "missionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "missionTitle": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "worldId": {
+          "type": "string",
+          "enum": ["english", "mathematics", "science", "business"]
+        },
+        "classId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "className": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "teacherId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "studentUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "dueDate": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "status": {
+          "type": "string",
+          "enum": ["assigned", "completed"]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "missionId",
+        "missionTitle",
+        "worldId",
+        "classId",
+        "className",
+        "teacherId",
+        "studentUid",
+        "status",
+        "createdAt"
+      ]
+    },
+    "LearnerProgress": {
+      "title": "LearnerProgress",
+      "description": "Learner progression, XP, streaks, mission records, achievements, and analytics.",
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "type": "integer"
+        },
+        "learnerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "totalXp": {
+          "type": "integer"
+        },
+        "level": {
+          "type": "integer"
+        },
+        "currentStreak": {
+          "type": "integer"
+        },
+        "bestStreak": {
+          "type": "integer"
+        },
+        "completedMissionIds": {
+          "type": "array"
+        },
+        "missionRecords": {
+          "type": "object"
+        },
+        "unlockedAchievementIds": {
+          "type": "array"
+        },
+        "analytics": {
+          "type": "object"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "learnerId",
+        "displayName",
+        "totalXp",
+        "level",
+        "currentStreak",
+        "bestStreak",
+        "completedMissionIds",
+        "missionRecords",
+        "unlockedAchievementIds",
+        "analytics",
+        "updatedAt"
+      ]
+    },
+    "MissionSubmission": {
+      "title": "MissionSubmission",
+      "description": "Recorded mission attempt linked to student and optional teacher/class for analytics.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "studentUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "studentName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "missionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "missionTitle": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "worldId": {
+          "type": "string",
+          "enum": ["english", "mathematics", "science", "business"]
+        },
+        "topic": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "teacherId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "correctCount": {
+          "type": "integer"
+        },
+        "totalQuestions": {
+          "type": "integer"
+        },
+        "xpEarnedInRun": {
+          "type": "integer"
+        },
+        "xpAddedToProfile": {
+          "type": "integer"
+        },
+        "bestStreakInRun": {
+          "type": "integer"
+        },
+        "completedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "studentUid",
+        "studentName",
+        "missionId",
+        "missionTitle",
+        "worldId",
+        "correctCount",
+        "totalQuestions",
+        "xpEarnedInRun",
+        "xpAddedToProfile",
+        "completedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Authenticated user profile document."
+    },
+    "/users/{userId}/progress/{progressId}": {
+      "schema": { "$ref": "#/entities/LearnerProgress" },
+      "description": "Learner progress document stored at progress/current."
+    },
+    "/teachers/{userId}": {
+      "schema": { "$ref": "#/entities/RoleGrant" },
+      "description": "Trusted teacher role grant documents managed by admin or server."
+    },
+    "/admins/{userId}": {
+      "schema": { "$ref": "#/entities/RoleGrant" },
+      "description": "Admin role grant documents."
+    },
+    "/missions/{missionId}": {
+      "schema": { "$ref": "#/entities/Mission" },
+      "description": "Draft and published educational missions."
+    },
+    "/missions/{missionId}/private/{docId}": {
+      "schema": { "$ref": "#/entities/MissionPrivateKey" },
+      "description": "Teacher-only answer keys for teacher-authored missions."
+    },
+    "/missionAnswerKeys/{missionId}": {
+      "schema": { "$ref": "#/entities/MissionPrivateKey" },
+      "description": "Server-only answer keys inaccessible to client SDKs."
+    },
+    "/classes/{classId}": {
+      "schema": { "$ref": "#/entities/ClassRoom" },
+      "description": "Teacher-created classroom cohorts."
+    },
+    "/enrollments/{enrollmentId}": {
+      "schema": { "$ref": "#/entities/ClassEnrollment" },
+      "description": "Student-to-class enrollment records."
+    },
+    "/assignments/{assignmentId}": {
+      "schema": { "$ref": "#/entities/MissionAssignment" },
+      "description": "Assigned missions per student/class."
+    },
+    "/submissions/{submissionId}": {
+      "schema": { "$ref": "#/entities/MissionSubmission" },
+      "description": "Mission attempt history and analytics records."
+    }
+  }
+}

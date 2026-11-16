@@ -1,4 +1,4 @@
-import { ACHIEVEMENTS } from '../data/missions';
+import { ACHIEVEMENTS } from '../data/missions.ts';
 import type {
   AchievementDefinition,
   LearnerProgressState,

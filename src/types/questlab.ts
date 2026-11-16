@@ -1,12 +1,23 @@
 export type SubjectWorldId = 'english' | 'mathematics' | 'science' | 'business';
 
+export type UserRole = 'student' | 'teacher';
+
+export type MissionStatus = 'draft' | 'published';
+
+export type DifficultyLevel = 'Foundational' | 'Intermediate' | 'Advanced';
+
+export type QuestionStyle = 'conceptual' | 'applied' | 'analytical';
+
 export type ScreenRoute =
   | 'landing'
   | 'dashboard'
   | 'missions'
   | 'briefing'
   | 'quiz'
-  | 'completion';
+  | 'completion'
+  | 'profile'
+  | 'teacher'
+  | 'auth';
 
 export type WorldLockStatus = 'unlocked' | 'locked';
 
@@ -41,12 +52,23 @@ export interface MissionQuestion {
   explanation: string;
 }
 
+export interface StudentMissionQuestion {
+  id: string;
+  promptSentence: string;
+  targetPhrase: string;
+  questionText: string;
+  options: QuestionOption[];
+  hint: string;
+}
+
 export interface MissionDefinition {
   id: string;
   worldId: SubjectWorldId;
   title: string;
   subject: string;
   topic: string;
+  gradeLevel?: string;
+  difficulty?: DifficultyLevel;
   summary: string;
   estimatedMinutes: number;
   objectives: string[];
@@ -54,8 +76,11 @@ export interface MissionDefinition {
   xpPerIncorrect: number;
   imageSrc: string;
   imageAlt: string;
-  authorType: 'curated' | 'ai_generated';
+  authorType: 'curated' | 'ai_generated' | 'teacher_created';
   teacherId?: string;
+  status?: MissionStatus;
+  createdAt?: string;
+  updatedAt?: string;
   questions: MissionQuestion[];
 }
 
@@ -101,6 +126,8 @@ export interface QuestionResultEntry {
   selectedOptionId: string;
   isCorrect: boolean;
   xpEarned: number;
+  correctOptionId?: string;
+  explanation?: string;
 }
 
 export interface MissionRunSummary {
@@ -117,37 +144,82 @@ export interface MissionRunSummary {
   questionResults: QuestionResultEntry[];
 }
 
-/**
- * Future-ready platform contracts for Firebase integration,
- * teacher dashboards, student profiles, and AI-generated missions.
- */
-export interface StudentProfile {
+export interface UserProfile {
   uid: string;
   displayName: string;
-  email?: string;
-  role: 'student' | 'teacher';
-  cohortId?: string;
+  email: string;
+  role: UserRole;
+  gradeBand?: string;
+  bio?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ClassRoom {
+  id: string;
+  name: string;
+  subject: string;
+  gradeLevel: string;
+  teacherId: string;
   createdAt: string;
 }
 
-export interface TeacherDashboardSummary {
+export interface ClassEnrollment {
+  id: string;
+  classId: string;
+  className: string;
   teacherId: string;
-  cohortName: string;
-  activeStudentsCount: number;
-  averageMasteryRate: number;
-  assignedMissionIds: string[];
+  studentUid: string;
+  studentName: string;
+  studentEmail: string;
+  joinedAt: string;
 }
 
-export interface AIMissionGenerationSpec {
+export interface MissionAssignment {
+  id: string;
+  missionId: string;
+  missionTitle: string;
+  worldId: SubjectWorldId;
+  classId: string;
+  className: string;
+  teacherId: string;
+  studentUid: string;
+  dueDate?: string;
+  status: 'assigned' | 'completed';
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface MissionSubmission {
+  id: string;
+  studentUid: string;
+  studentName: string;
+  missionId: string;
+  missionTitle: string;
+  worldId: SubjectWorldId;
+  topic?: string;
+  teacherId?: string;
+  correctCount: number;
+  totalQuestions: number;
+  xpEarnedInRun: number;
+  xpAddedToProfile: number;
+  bestStreakInRun?: number;
+  completedAt: string;
+}
+
+export interface AIMissionGeneratorInput {
   worldId: SubjectWorldId;
   subject: string;
   topic: string;
-  targetGradeBand: string;
+  gradeLevel: string;
+  difficulty: DifficultyLevel;
   questionCount: number;
+  questionStyle: QuestionStyle;
+  learningObjectives: string[];
 }
 
 export interface ProgressRepository {
-  load(): LearnerProgressState;
-  save(state: LearnerProgressState): void;
-  reset(): LearnerProgressState;
+  load(): Promise<LearnerProgressState> | LearnerProgressState;
+  save(state: LearnerProgressState): Promise<void> | void;
+  reset(): Promise<LearnerProgressState> | LearnerProgressState;
 }
