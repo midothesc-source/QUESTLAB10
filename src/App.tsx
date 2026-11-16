@@ -6,6 +6,7 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { LandingView } from './components/LandingView';
 import { MissionBriefingView } from './components/MissionBriefingView';
 import { MissionSelectionView } from './components/MissionSelectionView';
+import { OfflineIndicator } from './components/OfflineIndicator';
 import { ProfileView } from './components/ProfileView';
 import { QuizView } from './components/QuizView';
 import { TeacherDashboardView } from './components/TeacherDashboardView';
@@ -445,6 +446,7 @@ export default function App() {
           </div>
         </footer>
 
+        <OfflineIndicator />
         <ToastContainer toasts={toasts} onDismiss={dismissToast} />
       </div>
     </ErrorBoundary>

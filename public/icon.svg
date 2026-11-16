@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <radialGradient id="bgGlow" cx="50%" cy="45%" r="60%">
+      <stop offset="0%" stop-color="#14233c" />
+      <stop offset="55%" stop-color="#0d1117" />
+      <stop offset="100%" stop-color="#080d19" />
+    </radialGradient>
+    <linearGradient id="cyanViolet" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#55D9F5" />
+      <stop offset="100%" stop-color="#A68AFF" />
+    </linearGradient>
+    <linearGradient id="ringAccent" x1="100%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#55D9F5" stop-opacity="0.95" />
+      <stop offset="100%" stop-color="#A68AFF" stop-opacity="0.35" />
+    </linearGradient>
+  </defs>
+
+  <rect width="512" height="512" rx="112" fill="url(#bgGlow)" />
+
+  <!-- Subtle outer grid ring -->
+  <circle cx="256" cy="256" r="196" fill="none" stroke="#55D9F5" stroke-opacity="0.16" stroke-width="4" />
+
+  <!-- Tilted orbital ellipse -->
+  <ellipse cx="256" cy="256" rx="176" ry="74" transform="rotate(-28 256 256)" fill="none" stroke="url(#ringAccent)" stroke-width="10" />
+  <ellipse cx="256" cy="256" rx="176" ry="74" transform="rotate(28 256 256)" fill="none" stroke="#A68AFF" stroke-opacity="0.45" stroke-width="6" />
+
+  <!-- Core Q ring -->
+  <circle cx="256" cy="248" r="102" fill="#080d19" fill-opacity="0.9" stroke="url(#cyanViolet)" stroke-width="26" />
+  <!-- Q tail / prism beam -->
+  <path d="M 294 286 L 364 356" stroke="#55D9F5" stroke-width="28" stroke-linecap="round" />
+
+  <!-- Central star core -->
+  <circle cx="256" cy="248" r="24" fill="#55D9F5" />
+  <circle cx="384" cy="146" r="12" fill="#A68AFF" />
+</svg>

@@ -1,3 +1,4 @@
+import { PWAInstallButton } from './PWAInstallButton';
 import type { ScreenRoute, UserProfile } from '../types/questlab';
 
 interface TopNavProps {
@@ -122,8 +123,9 @@ export function TopNav({
           </nav>
         )}
 
-        {/* Zone 3: Single primary action */}
-        <div className="shrink-0">
+        {/* Zone 3: In-app install action (when available) + primary action */}
+        <div className="flex shrink-0 items-center gap-2">
+          <PWAInstallButton />
           {isLanding ? (
             <button
               type="button"
