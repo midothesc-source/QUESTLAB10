@@ -73,7 +73,7 @@
     },
     "Mission": {
       "title": "Mission",
-      "description": "Public/assigned mission definition without private student-hidden answer keys when stored separately.",
+      "description": "Sanitized public/assigned mission definition strictly excluding correctOptionId and explanation.",
       "type": "object",
       "properties": {
         "id": {
@@ -174,7 +174,7 @@
     },
     "MissionPrivateKey": {
       "title": "MissionPrivateKey",
-      "description": "Teacher-scoped or server-only answer key map for a mission.",
+      "description": "Server-only answer key map for a mission (inaccessible to client SDKs).",
       "type": "object",
       "properties": {
         "missionId": {
@@ -198,6 +198,46 @@
         }
       },
       "required": ["missionId", "teacherId", "answers", "updatedAt"]
+    },
+    "GradingAttempt": {
+      "title": "GradingAttempt",
+      "description": "Server-only transactional idempotency and audit record for graded quiz attempts.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "attemptId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "missionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "answersHash": {
+          "type": "string",
+          "minLength": 64,
+          "maxLength": 64
+        },
+        "submissionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "attemptId", "missionId", "answersHash", "submissionId", "createdAt"]
     },
     "ClassRoom": {
       "title": "ClassRoom",
@@ -374,7 +414,7 @@
     },
     "LearnerProgress": {
       "title": "LearnerProgress",
-      "description": "Learner progression, XP, streaks, mission records, achievements, and analytics.",
+      "description": "Server-authoritative learner progression, XP, streaks, mission records, achievements, and analytics.",
       "type": "object",
       "properties": {
         "schemaVersion": {
@@ -415,6 +455,9 @@
         "analytics": {
           "type": "object"
         },
+        "guestLegacySummary": {
+          "type": "object"
+        },
         "updatedAt": {
           "type": "string",
           "format": "date-time"
@@ -437,7 +480,7 @@
     },
     "MissionSubmission": {
       "title": "MissionSubmission",
-      "description": "Recorded mission attempt linked to student and optional teacher/class for analytics.",
+      "description": "Server-authoritative mission attempt created exclusively inside /api/missions/grade transaction.",
       "type": "object",
       "properties": {
         "id": {
@@ -522,7 +565,7 @@
     },
     "/users/{userId}/progress/{progressId}": {
       "schema": { "$ref": "#/entities/LearnerProgress" },
-      "description": "Learner progress document stored at progress/current."
+      "description": "Server-authoritative learner progress document stored at progress/current (client read-only)."
     },
     "/teachers/{userId}": {
       "schema": { "$ref": "#/entities/RoleGrant" },
@@ -534,15 +577,15 @@
     },
     "/missions/{missionId}": {
       "schema": { "$ref": "#/entities/Mission" },
-      "description": "Draft and published educational missions."
-    },
-    "/missions/{missionId}/private/{docId}": {
-      "schema": { "$ref": "#/entities/MissionPrivateKey" },
-      "description": "Teacher-only answer keys for teacher-authored missions."
+      "description": "Draft and published educational missions (questions stripped of answer keys)."
     },
     "/missionAnswerKeys/{missionId}": {
       "schema": { "$ref": "#/entities/MissionPrivateKey" },
       "description": "Server-only answer keys inaccessible to client SDKs."
+    },
+    "/gradingAttempts/{attemptId}": {
+      "schema": { "$ref": "#/entities/GradingAttempt" },
+      "description": "Server-only idempotency and audit records for graded quiz attempts."
     },
     "/classes/{classId}": {
       "schema": { "$ref": "#/entities/ClassRoom" },
@@ -554,11 +597,11 @@
     },
     "/assignments/{assignmentId}": {
       "schema": { "$ref": "#/entities/MissionAssignment" },
-      "description": "Assigned missions per student/class."
+      "description": "Assigned missions per student/class (completion written strictly by server grading)."
     },
     "/submissions/{submissionId}": {
       "schema": { "$ref": "#/entities/MissionSubmission" },
-      "description": "Mission attempt history and analytics records."
+      "description": "Server-authoritative mission attempt history and analytics records (client read-only)."
     }
   }
 }

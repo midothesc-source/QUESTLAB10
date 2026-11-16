@@ -4,20 +4,21 @@ QUESTLAB turns English, Mathematics, Science, and Business concepts into interac
 
 ## Architecture Overview
 
-- **Frontend**: React 19 + TypeScript + Vite + Tailwind CSS v4
-- **Backend Server (`server.ts`)**: Express serving Vite middleware in development, built SPA assets in production, and secure API routes:
+- **Frontend**: React 19 + TypeScript + Vite + Tailwind CSS v4 (strictly public mission payloads; zero answer keys or secrets in client bundles)
+- **Backend Server (`server/app.ts`, `server.ts`, `api/[...path].ts`)**: Express server & Vercel Serverless catch-all API handler:
   - `GET /api/health` — Reports Gemini & Firebase Admin configuration status
-  - `POST /api/ai/generate-mission` — Server-side Gemini mission generation (`@google/genai`)
-  - `POST /api/ai/regenerate-question` — Single-question regeneration for teacher drafts
-  - `POST /api/missions/register-key` — Stores mission answer keys server-side
-  - `POST /api/missions/grade-question` & `POST /api/missions/grade` — Authoritative server-side grading without exposing answer keys to student clients
-  - `POST /api/admin/grant-teacher` — Administrator-only endpoint to assign teacher custom claims and `/teachers/{uid}` records
-- **Database & Auth**: Firebase Authentication + Cloud Firestore (with hardened `firestore.rules`)
-- **Offline / Guest Support**: `LocalStorageProgressRepository` runs in Guest Mode and merges cleanly without duplicating XP when signing into `FirestoreProgressRepository`.
+  - `POST /api/ai/generate-mission` & `POST /api/ai/regenerate-question` — Server-side Gemini mission generation (`@google/genai`)
+  - `POST /api/missions/save`, `GET /api/missions/teacher`, `GET /api/missions/:missionId/teacher-draft`, `PATCH /api/missions/:missionId/status`, `DELETE /api/missions/:missionId`, `POST /api/missions/register-key` — Ownership-verified teacher mission & server-only answer-key storage
+  - `POST /api/missions/grade` — Authoritative full-attempt transactional grading (`users/{uid}/progress/current`, `submissions/{id}`, `assignments/{id}`, and `gradingAttempts/{uid}_{attemptId}` idempotency)
+  - `POST /api/missions/practice-grade` — Curated-mission guest practice evaluation (no Firestore writes)
+  - `GET /api/progress`, `POST /api/progress/reset`, `POST /api/progress/migrate-guest` — Server-authoritative learner progress lifecycle
+  - `POST /api/admin/grant-teacher` — Rate-limited, timing-safe administrator endpoint to assign teacher custom claims and `/teachers/{uid}` records
+- **Database & Auth**: Firebase Authentication + Cloud Firestore (with fail-closed `firestore.rules`)
+- **Offline / Guest Support**: `LocalStorageProgressRepository` runs in Guest Practice Mode and archives guest history cleanly inside `guestLegacySummary` without promoting unverified client XP into official account XP.
 
 ## Environment Configuration
 
-Copy `.env.example` to `.env` (or configure secrets in AI Studio Secrets):
+Copy `.env.example` to `.env` (or configure secrets in Vercel / AI Studio Secrets):
 
 ```env
 GEMINI_API_KEY="your-server-side-gemini-api-key"
@@ -31,23 +32,12 @@ VITE_FIREBASE_PROJECT_ID=""
 VITE_FIREBASE_APP_ID=""
 VITE_FIREBASE_DATABASE_ID=""
 
-# Server-side Firebase Admin SDK JSON (recommended for persistent answer-key grading & custom claims)
+# REQUIRED for authenticated grading, progress sync, and teacher mission writes
 FIREBASE_SERVICE_ACCOUNT_KEY=""
 ADMIN_SETUP_SECRET=""
 ```
 
-> **Security Note**: Never place `GEMINI_API_KEY` or `FIREBASE_SERVICE_ACCOUNT_KEY` in any `VITE_*` variable.
-
-## Firebase Console Setup
-
-1. **Authentication Providers**:
-   - Google Sign-In is enabled by default.
-   - To enable student Email/Password registration & login, open Firebase Console -> **Authentication -> Sign-in method** and enable **Email/Password**.
-2. **Firestore Security Rules**:
-   - Rules live in `/firestore.rules` and are validated with `npx eslint firestore.rules`.
-   - Student self-registration is strictly restricted to `role: 'student'`.
-3. **Granting Educator (Teacher) Access**:
-   - The bootstrapped administrator (`midothesc@gmail.com`, verified email) can assign teacher privileges via `POST /api/admin/grant-teacher` or in Firestore `/teachers/{uid}`.
+> **Security Note**: Never place `GEMINI_API_KEY`, `FIREBASE_SERVICE_ACCOUNT_KEY`, or `ADMIN_SETUP_SECRET` in any `VITE_*` variable.
 
 ## Development, Testing & Production
 
@@ -55,8 +45,11 @@ ADMIN_SETUP_SECRET=""
 # Install dependencies
 npm install
 
-# Run unit tests (progression engine, mission schema validation, guest migration, role checks, storage repo)
+# Run unit & API security integration tests
 npm test
+
+# Run Firestore Emulator security rules tests (requires Java runtime + Firebase CLI)
+npm run test:rules
 
 # Type-check TypeScript
 npm run lint

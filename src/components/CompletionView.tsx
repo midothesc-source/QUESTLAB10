@@ -2,12 +2,12 @@ import { Award, CheckCircle2, Flame, LayoutDashboard, RotateCw, XCircle } from '
 import { calculateLevelInfo } from '../engine/progression';
 import type {
   LearnerProgressState,
-  MissionDefinition,
   MissionRunSummary,
+  PublicMissionDefinition,
 } from '../types/questlab';
 
 interface CompletionViewProps {
-  mission: MissionDefinition;
+  mission: PublicMissionDefinition;
   summary: MissionRunSummary;
   progress: LearnerProgressState;
   isAuthenticated: boolean;
@@ -34,7 +34,7 @@ export function CompletionView({
         <div className="flex flex-wrap items-center justify-between gap-2">
           <p className="text-sm font-medium tracking-wide text-[#55D9F5]">Mission Complete</p>
           <span className="font-mono-tabular text-xs text-slate-400">
-            {isAuthenticated ? 'Cloud Synced' : 'Saved Locally'}
+            {isAuthenticated ? 'Server Verified · Cloud Synced' : 'Guest Practice Mode (Local)'}
           </span>
         </div>
         <h1 className="font-display mt-2 text-3xl font-bold tracking-tight text-white">
@@ -64,7 +64,9 @@ export function CompletionView({
           </div>
 
           <div className="sm:border-l sm:border-slate-400/15 sm:pl-6">
-            <p className="text-xs text-slate-400">XP Added to Profile</p>
+            <p className="text-xs text-slate-400">
+              {isAuthenticated ? 'Official XP Added' : 'Practice XP Added'}
+            </p>
             <p
               data-testid="completion-xp-added"
               className="font-mono-tabular mt-1.5 text-2xl font-bold text-[#55D9F5]"
@@ -136,14 +138,15 @@ export function CompletionView({
           </div>
         )}
 
-        {/* Question Review List */}
+        {/* Question Review List (Explanations provided strictly post-submission by server) */}
         <div className="mt-7 border-t border-slate-400/15 pt-6">
           <h2 className="font-display text-lg font-semibold text-white">Question Breakdown</h2>
           <ul className="mt-3 divide-y divide-slate-400/12">
             {mission.questions.map((question, idx) => {
-              const entry = summary.questionResults[idx];
+              const entry = summary.questionResults.find((r) => r.questionId === question.id) ??
+                summary.questionResults[idx];
               const isCorrect = entry?.isCorrect ?? false;
-              const explanation = entry?.explanation || question.explanation;
+              const explanation = entry?.explanation;
               return (
                 <li key={question.id} className="py-3">
                   <div className="flex flex-col justify-between gap-2 sm:flex-row sm:items-center">

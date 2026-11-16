@@ -105,15 +105,6 @@ service cloud.firestore {
         && data.updatedAt is timestamp;
     }
 
-    function isValidPrivateKey(data) {
-      return data.keys().hasAll(['missionId', 'teacherId', 'answers', 'updatedAt'])
-        && data.keys().hasOnly(['missionId', 'teacherId', 'answers', 'updatedAt'])
-        && isValidId(data.missionId)
-        && isValidId(data.teacherId)
-        && data.answers is map
-        && data.updatedAt is timestamp;
-    }
-
     function isValidClassRoom(data) {
       return data.keys().hasAll(['id', 'name', 'teacherId', 'createdAt'])
         && data.keys().hasOnly(['id', 'name', 'subject', 'gradeLevel', 'teacherId', 'createdAt'])
@@ -168,58 +159,6 @@ service cloud.firestore {
         && (!('updatedAt' in data) || data.updatedAt is timestamp);
     }
 
-    function isValidProgress(data) {
-      return data.keys().hasAll([
-          'schemaVersion', 'learnerId', 'displayName', 'totalXp', 'level',
-          'currentStreak', 'bestStreak', 'completedMissionIds',
-          'missionRecords', 'unlockedAchievementIds', 'analytics', 'updatedAt'
-        ])
-        && data.keys().hasOnly([
-          'schemaVersion', 'learnerId', 'displayName', 'totalXp', 'level',
-          'currentStreak', 'bestStreak', 'completedMissionIds',
-          'missionRecords', 'unlockedAchievementIds', 'analytics', 'updatedAt'
-        ])
-        && data.schemaVersion is int && data.schemaVersion >= 1 && data.schemaVersion <= 10
-        && isValidId(data.learnerId)
-        && data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 80
-        && data.totalXp is int && data.totalXp >= 0 && data.totalXp <= 1000000
-        && data.level is int && data.level >= 1 && data.level <= 1000
-        && data.currentStreak is int && data.currentStreak >= 0 && data.currentStreak <= 10000
-        && data.bestStreak is int && data.bestStreak >= 0 && data.bestStreak <= 10000
-        && data.completedMissionIds is list && data.completedMissionIds.size() <= 500
-        && data.missionRecords is map
-        && data.unlockedAchievementIds is list && data.unlockedAchievementIds.size() <= 200
-        && data.analytics is map
-        && data.updatedAt is timestamp;
-    }
-
-    function isValidSubmission(data) {
-      return data.keys().hasAll([
-          'id', 'studentUid', 'studentName', 'missionId', 'missionTitle',
-          'worldId', 'correctCount', 'totalQuestions',
-          'xpEarnedInRun', 'xpAddedToProfile', 'completedAt'
-        ])
-        && data.keys().hasOnly([
-          'id', 'studentUid', 'studentName', 'missionId', 'missionTitle',
-          'worldId', 'topic', 'teacherId', 'correctCount', 'totalQuestions',
-          'xpEarnedInRun', 'xpAddedToProfile', 'bestStreakInRun', 'completedAt'
-        ])
-        && isValidId(data.id)
-        && isValidId(data.studentUid)
-        && data.studentName is string && data.studentName.size() >= 1 && data.studentName.size() <= 80
-        && isValidId(data.missionId)
-        && data.missionTitle is string && data.missionTitle.size() >= 1 && data.missionTitle.size() <= 120
-        && data.worldId in ['english', 'mathematics', 'science', 'business']
-        && (!('topic' in data) || (data.topic is string && data.topic.size() <= 120))
-        && (!('teacherId' in data) || isValidId(data.teacherId))
-        && data.correctCount is int && data.correctCount >= 0 && data.correctCount <= 20
-        && data.totalQuestions is int && data.totalQuestions >= 1 && data.totalQuestions <= 20
-        && data.xpEarnedInRun is int && data.xpEarnedInRun >= 0 && data.xpEarnedInRun <= 2000
-        && data.xpAddedToProfile is int && data.xpAddedToProfile >= 0 && data.xpAddedToProfile <= 2000
-        && (!('bestStreakInRun' in data) || (data.bestStreakInRun is int && data.bestStreakInRun >= 0 && data.bestStreakInRun <= 20))
-        && data.completedAt is timestamp;
-    }
-
     // --- Collection Rules ---
 
     // User Profiles (PII isolated to owner or admin)
@@ -246,31 +185,10 @@ service cloud.firestore {
           )
         );
 
-      // Learner Progress subcollection
+      // Learner Progress subcollection (client read-only; server Admin SDK handles all mutations)
       match /progress/{progressId} {
         allow get: if isValidId(userId) && isValidId(progressId) && (isOwner(userId) || isAdmin());
-        allow create: if isValidId(userId) && isValidId(progressId)
-          && progressId == 'current'
-          && isOwner(userId)
-          && isValidProgress(incoming())
-          && incoming().learnerId == request.auth.uid
-          && incoming().updatedAt == request.time;
-        allow update: if isValidId(userId) && isValidId(progressId)
-          && progressId == 'current'
-          && isValidProgress(incoming())
-          && incoming().learnerId == existing().learnerId
-          && incoming().updatedAt == request.time
-          && (
-            isAdmin() ||
-            (
-              isOwner(userId)
-              && incoming().diff(existing()).affectedKeys().hasOnly([
-                'displayName', 'totalXp', 'level', 'currentStreak', 'bestStreak',
-                'completedMissionIds', 'missionRecords', 'unlockedAchievementIds',
-                'analytics', 'updatedAt'
-              ])
-            )
-          );
+        allow create, update, delete: if false;
       }
     }
 
@@ -287,7 +205,7 @@ service cloud.firestore {
       allow create, update, delete: if isValidId(userId) && isAdmin();
     }
 
-    // Missions (student-facing documents contain no secret answer key when stored separately)
+    // Missions (student-facing documents contain no answer keys)
     match /missions/{missionId} {
       allow get: if isValidId(missionId) && isSignedIn() && (
         existing().status == 'published' ||
@@ -321,34 +239,19 @@ service cloud.firestore {
         ]);
       allow delete: if isValidId(missionId) && isTeacher() && (isAdmin() || existing().teacherId == request.auth.uid);
 
-      // Teacher-only private answer keys for drafted/published missions
+      // Legacy private path permanently locked from client access; answer keys live in server-only /missionAnswerKeys
       match /private/{docId} {
-        allow get: if isValidId(missionId) && isValidId(docId) && isTeacher() && (
-          isAdmin() ||
-          get(/databases/$(database)/documents/missions/$(missionId)).data.teacherId == request.auth.uid
-        );
-        allow create, update: if isValidId(missionId) && isValidId(docId)
-          && docId == 'answerKey'
-          && isTeacher()
-          && isValidPrivateKey(incoming())
-          && incoming().missionId == missionId
-          && incoming().updatedAt == request.time
-          && (
-            isAdmin() ||
-            (
-              incoming().teacherId == request.auth.uid &&
-              get(/databases/$(database)/documents/missions/$(missionId)).data.teacherId == request.auth.uid
-            )
-          );
-        allow delete: if isValidId(missionId) && isValidId(docId) && isTeacher() && (
-          isAdmin() ||
-          get(/databases/$(database)/documents/missions/$(missionId)).data.teacherId == request.auth.uid
-        );
+        allow read, write: if false;
       }
     }
 
     // Server-only answer keys (inaccessible to client SDKs)
     match /missionAnswerKeys/{missionId} {
+      allow read, write: if false;
+    }
+
+    // Server-only grading attempt idempotency records (inaccessible to client SDKs)
+    match /gradingAttempts/{attemptId} {
       allow read, write: if false;
     }
 
@@ -404,7 +307,7 @@ service cloud.firestore {
       );
     }
 
-    // Mission Assignments
+    // Mission Assignments (students read only; completion written exclusively by server grading transaction)
     match /assignments/{assignmentId} {
       allow get: if isValidId(assignmentId) && isSignedIn() && (
         existing().studentUid == request.auth.uid ||
@@ -421,11 +324,23 @@ service cloud.firestore {
         && isValidAssignment(incoming())
         && incoming().id == assignmentId
         && incoming().teacherId == request.auth.uid
+        && incoming().status == 'assigned'
         && incoming().createdAt == request.time
         && exists(/databases/$(database)/documents/classes/$(incoming().classId))
-        && get(/databases/$(database)/documents/classes/$(incoming().classId)).data.teacherId == request.auth.uid;
+        && get(/databases/$(database)/documents/classes/$(incoming().classId)).data.teacherId == request.auth.uid
+        && (
+          incoming().missionId == 'grammar-vault-01' ||
+          (
+            exists(/databases/$(database)/documents/missions/$(incoming().missionId))
+            && get(/databases/$(database)/documents/missions/$(incoming().missionId)).data.status == 'published'
+            && (
+              isAdmin() ||
+              get(/databases/$(database)/documents/missions/$(incoming().missionId)).data.teacherId == request.auth.uid
+            )
+          )
+        );
       allow update: if isValidId(assignmentId)
-        && isSignedIn()
+        && isTeacher()
         && isValidAssignment(incoming())
         && incoming().id == existing().id
         && incoming().missionId == existing().missionId
@@ -433,15 +348,14 @@ service cloud.firestore {
         && incoming().teacherId == existing().teacherId
         && incoming().studentUid == existing().studentUid
         && incoming().createdAt == existing().createdAt
-        && (
-          isAdmin() ||
-          (isTeacher() && existing().teacherId == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly(['dueDate', 'status', 'updatedAt'])) ||
-          (existing().studentUid == request.auth.uid && existing().status == 'assigned' && incoming().status == 'completed' && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']))
-        );
+        && incoming().updatedAt == request.time
+        && (existing().status != 'completed' || isAdmin())
+        && (isAdmin() || existing().teacherId == request.auth.uid)
+        && incoming().diff(existing()).affectedKeys().hasOnly(['dueDate', 'status', 'updatedAt']);
       allow delete: if isValidId(assignmentId) && isTeacher() && (isAdmin() || existing().teacherId == request.auth.uid);
     }
 
-    // Mission Submissions / Learning History (teacher-readable for missions/classes they own)
+    // Mission Submissions / Learning History (server-authoritative writes only; client read-only)
     match /submissions/{submissionId} {
       allow get: if isValidId(submissionId) && isSignedIn() && (
         existing().studentUid == request.auth.uid ||
@@ -453,12 +367,7 @@ service cloud.firestore {
         resource.data.teacherId == request.auth.uid ||
         isAdmin()
       );
-      allow create: if isValidId(submissionId)
-        && isSignedIn()
-        && isValidSubmission(incoming())
-        && incoming().id == submissionId
-        && incoming().studentUid == request.auth.uid
-        && incoming().completedAt == request.time;
+      allow create, update, delete: if false;
     }
   }
 }

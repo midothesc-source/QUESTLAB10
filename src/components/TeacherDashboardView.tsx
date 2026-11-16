@@ -15,7 +15,6 @@ import {
   UserPlus,
   Users,
 } from 'lucide-react';
-import { registerMissionKeyOnServer } from '../services/apiClient';
 import {
   addStudentToClass,
   assignMissionToStudents,
@@ -131,13 +130,6 @@ export function TeacherDashboardView({
       }
       if (cList.length > 0 && !assignClassId) {
         setAssignClassId(cList[0].id);
-      }
-
-      // Sync published answer keys to the runtime server grading cache quietly
-      for (const m of mList) {
-        if (m.status === 'published' && m.questions.some((q) => Boolean(q.correctOptionId))) {
-          void registerMissionKeyOnServer(m).catch(() => undefined);
-        }
       }
     } catch (err) {
       onNotify(
@@ -349,9 +341,6 @@ export function TeacherDashboardView({
     if (!profile) return;
     try {
       const saved = await saveTeacherMission(mission, profile.uid, status);
-      await registerMissionKeyOnServer({ ...mission, teacherId: profile.uid, status }).catch(
-        () => undefined,
-      );
 
       setMissions((prev) => {
         const exists = prev.some((m) => m.id === saved.id);
@@ -377,11 +366,6 @@ export function TeacherDashboardView({
     const nextStatus = mission.status === 'published' ? 'draft' : 'published';
     try {
       await updateMissionPublicationStatus(mission.id, nextStatus);
-      if (nextStatus === 'published') {
-        await registerMissionKeyOnServer({ ...mission, status: 'published' }).catch(
-          () => undefined,
-        );
-      }
       setMissions((prev) =>
         prev.map((m) => (m.id === mission.id ? { ...m, status: nextStatus } : m)),
       );

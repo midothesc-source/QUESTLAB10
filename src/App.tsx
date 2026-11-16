@@ -13,15 +13,17 @@ import { ToastContainer, type ToastMessage, type ToastTone } from './components/
 import { TopNav } from './components/TopNav';
 import { MISSIONS } from './data/missions';
 import { calculateLevelInfo, commitMissionCompletion } from './engine/progression';
-import { fetchServerHealth, gradeMissionOnServer } from './services/apiClient';
+import {
+  fetchServerHealth,
+  submitGuestPracticeOnServer,
+  submitMissionAttemptOnServer,
+} from './services/apiClient';
 import { logoutUser, subscribeToAuthState } from './services/authService';
 import {
   fetchPublishedMissions,
   fetchStudentAssignments,
   fetchStudentEnrollments,
   fetchStudentSubmissions,
-  markAssignmentCompleted,
-  recordMissionSubmission,
 } from './services/firestoreService';
 import {
   FirestoreProgressRepository,
@@ -31,11 +33,11 @@ import type {
   ClassEnrollment,
   LearnerProgressState,
   MissionAssignment,
-  MissionDefinition,
   MissionRunSummary,
   MissionSubmission,
-  QuestionResultEntry,
+  PublicMissionDefinition,
   ScreenRoute,
+  SubmittedAnswerItem,
   UserProfile,
 } from './types/questlab';
 
@@ -54,10 +56,10 @@ function getInitialUrlState(): { initialScreen: ScreenRoute; oobCode: string | n
 }
 
 function mergeMissionLists(
-  curated: MissionDefinition[],
-  published: MissionDefinition[],
-): MissionDefinition[] {
-  const map = new Map<string, MissionDefinition>();
+  curated: PublicMissionDefinition[],
+  published: PublicMissionDefinition[],
+): PublicMissionDefinition[] {
+  const map = new Map<string, PublicMissionDefinition>();
   for (const m of curated) {
     map.set(m.id, m);
   }
@@ -76,12 +78,13 @@ export default function App() {
   const [progress, setProgress] = useState<LearnerProgressState>(() =>
     guestProgressRepository.load(),
   );
-  const [cloudMissions, setCloudMissions] = useState<MissionDefinition[]>([]);
+  const [cloudMissions, setCloudMissions] = useState<PublicMissionDefinition[]>([]);
   const [assignments, setAssignments] = useState<MissionAssignment[]>([]);
   const [submissions, setSubmissions] = useState<MissionSubmission[]>([]);
   const [enrollments, setEnrollments] = useState<ClassEnrollment[]>([]);
 
   const [activeMissionId, setActiveMissionId] = useState<string>(MISSIONS[0].id);
+  const [activeAssignmentId, setActiveAssignmentId] = useState<string | undefined>(undefined);
   const [quizSessionKey, setQuizSessionKey] = useState(0);
   const [lastRunSummary, setLastRunSummary] = useState<MissionRunSummary | null>(null);
 
@@ -154,6 +157,7 @@ export default function App() {
           setAssignments([]);
           setSubmissions([]);
           setEnrollments([]);
+          setActiveAssignmentId(undefined);
           setProgress(guestProgressRepository.load());
           return;
         }
@@ -168,15 +172,15 @@ export default function App() {
           setProgress(state);
           if (migrated) {
             notify(
-              'Progress synced to cloud',
-              'Your guest XP and completed missions were merged into your account.',
-              'success',
+              'Guest practice history saved',
+              'Your local guest practice summary was recorded alongside your account. Official XP is earned through server-verified missions.',
+              'info',
             );
           }
         } catch (err) {
           notify(
             'Cloud progress sync warning',
-            err instanceof Error ? err.message : 'Using cached explorer progress.',
+            err instanceof Error ? err.message : 'Unable to load authoritative cloud progress.',
             'error',
           );
         }
@@ -206,8 +210,9 @@ export default function App() {
     [profile],
   );
 
-  const handleOpenMissionBriefing = useCallback((missionId: string) => {
+  const handleOpenMissionBriefing = useCallback((missionId: string, assignmentId?: string) => {
     setActiveMissionId(missionId);
+    setActiveAssignmentId(assignmentId);
     setCurrentScreen('briefing');
   }, []);
 
@@ -216,100 +221,61 @@ export default function App() {
     setCurrentScreen('quiz');
   }, []);
 
-  const handleCompleteMission = useCallback(
-    async (questionResults: QuestionResultEntry[]) => {
-      let nextState: LearnerProgressState;
-      let summary: MissionRunSummary;
-
+  const handleSubmitMissionAttempt = useCallback(
+    async (payload: {
+      attemptId: string;
+      answers: SubmittedAnswerItem[];
+      assignmentId?: string;
+    }) => {
       if (profile && cloudRepoRef.current) {
-        let resolvedResults = questionResults;
-        let serverTeacherId = activeMission.teacherId;
+        // Strict server-authoritative grading: NEVER fall back to client scoring for authenticated accounts.
+        const result = await submitMissionAttemptOnServer({
+          missionId: activeMission.id,
+          attemptId: payload.attemptId,
+          answers: payload.answers,
+          assignmentId: payload.assignmentId,
+        });
 
-        try {
-          const serverGrade = await gradeMissionOnServer(
-            activeMission.id,
-            questionResults.map((entry) => ({
-              questionId: entry.questionId,
-              selectedOptionId: entry.selectedOptionId,
-            })),
-          );
-          resolvedResults = serverGrade.questionResults;
-          if (serverGrade.teacherId) serverTeacherId = serverGrade.teacherId;
+        cloudRepoRef.current.applyAuthoritativeSnapshot(result.authoritativeProgress);
+        setProgress(result.authoritativeProgress);
+        setLastRunSummary(result.summary);
+        setActiveAssignmentId(undefined);
+        setCurrentScreen('completion');
 
-          if (serverGrade.authoritativeProgress && serverGrade.summary) {
-            nextState = serverGrade.authoritativeProgress;
-            summary = serverGrade.summary;
-          } else {
-            const computed = commitMissionCompletion(progress, activeMission, resolvedResults);
-            nextState = computed.nextState;
-            summary = computed.summary;
-          }
-        } catch {
-          const computed = commitMissionCompletion(progress, activeMission, resolvedResults);
-          nextState = computed.nextState;
-          summary = computed.summary;
-        }
-
-        try {
-          await cloudRepoRef.current.save(nextState);
-        } catch (err) {
-          notify(
-            'Cloud save warning',
-            err instanceof Error ? err.message : 'Saved locally; cloud sync will retry.',
-            'error',
-          );
-        }
-
-        // Record submission & complete matching assignments
-        try {
-          const sub = await recordMissionSubmission({
-            student: profile,
-            mission: activeMission,
-            teacherId: serverTeacherId,
-            correctCount: summary.correctCount,
-            totalQuestions: summary.totalQuestions,
-            xpEarnedInRun: summary.xpEarnedInRun,
-            xpAddedToProfile: summary.xpAddedToProfile,
-            bestStreakInRun: summary.bestStreakInRun,
-          });
-          setSubmissions((prev) => [sub, ...prev]);
-
-          const pendingForMission = assignments.filter(
-            (a) => a.missionId === activeMission.id && a.status === 'assigned',
-          );
-          for (const item of pendingForMission) {
-            await markAssignmentCompleted(item.id);
-          }
-          if (pendingForMission.length > 0) {
-            setAssignments((prev) =>
-              prev.map((a) =>
-                a.missionId === activeMission.id ? { ...a, status: 'completed' } : a,
-              ),
-            );
-          }
-        } catch {
-          // Do not block mission completion summary if submission log fails
-        }
-      } else {
-        const computed = commitMissionCompletion(progress, activeMission, questionResults);
-        nextState = computed.nextState;
-        summary = computed.summary;
-        guestProgressRepository.save(nextState);
+        // Refresh assignments and submissions from Firestore in background
+        void refreshCloudData(profile);
+        return;
       }
 
-      setProgress(nextState);
-      setLastRunSummary(summary);
+      // Guest Practice Mode (curated missions only, evaluated on server without minting official cloud XP)
+      const practiceResult = await submitGuestPracticeOnServer(activeMission.id, payload.answers);
+      const computed = commitMissionCompletion(
+        progress,
+        activeMission,
+        practiceResult.summary.questionResults,
+      );
+      guestProgressRepository.save(computed.nextState);
+      setProgress(computed.nextState);
+      setLastRunSummary(computed.summary);
       setCurrentScreen('completion');
     },
-    [activeMission, assignments, notify, profile, progress],
+    [activeMission, profile, progress, refreshCloudData],
   );
 
   const handleResetProgress = useCallback(async () => {
     if (profile && cloudRepoRef.current) {
-      const fresh = await cloudRepoRef.current.reset();
-      setProgress(fresh);
-      setLastRunSummary(null);
-      notify('Cloud progress reset', 'Your explorer XP and records were cleared.', 'info');
+      try {
+        const fresh = await cloudRepoRef.current.reset();
+        setProgress(fresh);
+        setLastRunSummary(null);
+        notify('Cloud progress reset', 'Your explorer XP and records were cleared.', 'info');
+      } catch (err) {
+        notify(
+          'Reset failed',
+          err instanceof Error ? err.message : 'Unable to reset cloud progress.',
+          'error',
+        );
+      }
     } else {
       const fresh = guestProgressRepository.reset();
       setProgress(fresh);
@@ -376,7 +342,7 @@ export default function App() {
             <MissionSelectionView
               progress={progress}
               missions={allMissions}
-              onSelectMission={handleOpenMissionBriefing}
+              onSelectMission={(missionId) => handleOpenMissionBriefing(missionId)}
               onBackToDashboard={() => setCurrentScreen('dashboard')}
             />
           )}
@@ -395,7 +361,8 @@ export default function App() {
               key={`${activeMission.id}-${quizSessionKey}`}
               mission={activeMission}
               isAuthenticated={Boolean(profile)}
-              onCompleteMission={handleCompleteMission}
+              assignmentId={activeAssignmentId}
+              onSubmitAttempt={handleSubmitMissionAttempt}
             />
           )}
 
@@ -472,8 +439,8 @@ export default function App() {
             <span>QUESTLAB · Interactive Learning Universe</span>
             <span>
               {profile
-                ? 'Cloud Firestore Sync · Gemini AI Mission Studio'
-                : 'Guest Local Persistence · Sign In for Cloud Sync & Teacher Studio'}
+                ? 'Server-Authoritative Grading · Cloud Firestore Sync'
+                : 'Guest Practice Mode · Sign In for Server-Verified Progress & Teacher Studio'}
             </span>
           </div>
         </footer>

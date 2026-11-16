@@ -41,27 +41,34 @@ export interface QuestionOption {
   text: string;
 }
 
-export interface MissionQuestion {
+/**
+ * Student-facing question representation. Never contains correctOptionId or explanation.
+ */
+export interface PublicMissionQuestion {
   id: string;
   promptSentence: string;
   targetPhrase: string;
   questionText: string;
   options: QuestionOption[];
-  correctOptionId: string;
   hint: string;
+}
+
+/**
+ * Private server/teacher-authoring answer key fields for a question.
+ */
+export interface PrivateMissionQuestionKey {
+  correctOptionId: string;
   explanation: string;
 }
 
-export interface StudentMissionQuestion {
-  id: string;
-  promptSentence: string;
-  targetPhrase: string;
-  questionText: string;
-  options: QuestionOption[];
-  hint: string;
-}
+/**
+ * Complete question definition used strictly by teachers in the authoring studio and server grading.
+ */
+export interface MissionQuestion extends PublicMissionQuestion, PrivateMissionQuestionKey {}
 
-export interface MissionDefinition {
+export type StudentMissionQuestion = PublicMissionQuestion;
+
+export interface PublicMissionDefinition {
   id: string;
   worldId: SubjectWorldId;
   title: string;
@@ -81,6 +88,10 @@ export interface MissionDefinition {
   status?: MissionStatus;
   createdAt?: string;
   updatedAt?: string;
+  questions: PublicMissionQuestion[];
+}
+
+export interface MissionDefinition extends Omit<PublicMissionDefinition, 'questions'> {
   questions: MissionQuestion[];
 }
 
@@ -107,6 +118,12 @@ export interface LearnerAnalytics {
   lastActiveAt: string | null;
 }
 
+export interface GuestLegacySummary {
+  guestXpEarned: number;
+  guestCompletedMissionIds: string[];
+  migratedAt: string;
+}
+
 export interface LearnerProgressState {
   schemaVersion: number;
   learnerId: string;
@@ -119,6 +136,7 @@ export interface LearnerProgressState {
   missionRecords: Record<string, MissionAttemptRecord>;
   unlockedAchievementIds: string[];
   analytics: LearnerAnalytics;
+  guestLegacySummary?: GuestLegacySummary;
 }
 
 export interface QuestionResultEntry {
@@ -142,6 +160,34 @@ export interface MissionRunSummary {
   endingStreakInRun: number;
   newlyUnlockedAchievements: AchievementDefinition[];
   questionResults: QuestionResultEntry[];
+}
+
+export interface SubmittedAnswerItem {
+  questionId: string;
+  selectedOptionId: string;
+}
+
+export interface GradeAttemptRequest {
+  missionId: string;
+  attemptId: string;
+  answers: SubmittedAnswerItem[];
+  assignmentId?: string;
+}
+
+export interface AuthoritativeGradeResponse {
+  missionId: string;
+  attemptId: string;
+  submissionId: string;
+  assignmentCompleted: boolean;
+  idempotentReplay?: boolean;
+  summary: MissionRunSummary;
+  authoritativeProgress: LearnerProgressState;
+}
+
+export interface PracticeGradeResponse {
+  missionId: string;
+  isPracticeOnly: true;
+  summary: MissionRunSummary;
 }
 
 export interface UserProfile {

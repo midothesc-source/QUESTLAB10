@@ -8,7 +8,6 @@ import {
   serverTimestamp,
   setDoc,
   Timestamp,
-  updateDoc,
   where,
 } from 'firebase/firestore';
 import { sanitizeId } from '../engine/missionValidation';
@@ -18,9 +17,17 @@ import type {
   MissionAssignment,
   MissionDefinition,
   MissionSubmission,
+  PublicMissionDefinition,
+  PublicMissionQuestion,
   SubjectWorldId,
   UserProfile,
 } from '../types/questlab';
+import {
+  deleteTeacherMissionOnServer,
+  fetchTeacherMissionsFromServer,
+  saveTeacherMissionOnServer,
+  updateMissionStatusOnServer,
+} from './apiClient';
 import { db, handleFirestoreError, OperationType } from './firebase';
 
 function toIso(value: unknown): string {
@@ -29,41 +36,25 @@ function toIso(value: unknown): string {
   return new Date().toISOString();
 }
 
-function stripMissionPrivateAnswers(mission: MissionDefinition) {
+function toPublicQuestion(q: Record<string, unknown>): PublicMissionQuestion {
   return {
-    id: mission.id,
-    worldId: mission.worldId,
-    title: mission.title.slice(0, 120),
-    subject: mission.subject.slice(0, 60),
-    topic: mission.topic.slice(0, 120),
-    gradeLevel: (mission.gradeLevel || 'General').slice(0, 40),
-    difficulty: mission.difficulty || 'Intermediate',
-    summary: mission.summary.slice(0, 600),
-    estimatedMinutes: Math.max(1, Math.min(120, Math.round(mission.estimatedMinutes))),
-    xpPerCorrect: Math.max(1, Math.min(200, Math.round(mission.xpPerCorrect))),
-    xpPerIncorrect: Math.max(0, Math.min(50, Math.round(mission.xpPerIncorrect))),
-    objectives: mission.objectives.slice(0, 8),
-    imageSrc: mission.imageSrc.slice(0, 240),
-    imageAlt: mission.imageAlt.slice(0, 240),
-    authorType: mission.authorType,
-    questions: mission.questions.map((q) => ({
-      id: q.id,
-      promptSentence: q.promptSentence,
-      targetPhrase: q.targetPhrase,
-      questionText: q.questionText,
-      options: q.options,
-      hint: q.hint,
-    })),
+    id: String(q.id || ''),
+    promptSentence: String(q.promptSentence || ''),
+    targetPhrase: String(q.targetPhrase || ''),
+    questionText: String(q.questionText || ''),
+    options: Array.isArray(q.options) ? (q.options as PublicMissionQuestion['options']) : [],
+    hint: String(q.hint || ''),
   };
 }
 
-export async function fetchPublishedMissions(): Promise<MissionDefinition[]> {
+export async function fetchPublishedMissions(): Promise<PublicMissionDefinition[]> {
   const path = 'missions';
   try {
     const q = query(collection(db, path), where('status', '==', 'published'));
     const snapshot = await getDocs(q);
     return snapshot.docs.map((docSnap) => {
       const data = docSnap.data();
+      const rawQuestions = Array.isArray(data.questions) ? data.questions : [];
       return {
         id: docSnap.id,
         worldId: (data.worldId as SubjectWorldId) || 'english',
@@ -77,160 +68,46 @@ export async function fetchPublishedMissions(): Promise<MissionDefinition[]> {
         objectives: Array.isArray(data.objectives) ? data.objectives : [],
         xpPerCorrect: Number(data.xpPerCorrect || 30),
         xpPerIncorrect: Number(data.xpPerIncorrect || 5),
-        imageSrc: String(data.imageSrc || '/src/assets/images/world_english_grammar_1794854621776.jpg'),
+        imageSrc: String(
+          data.imageSrc || '/src/assets/images/world_english_grammar_1794854621776.jpg',
+        ),
         imageAlt: String(data.imageAlt || 'QUESTLAB Mission'),
         authorType: data.authorType || 'teacher_created',
         teacherId: String(data.teacherId || ''),
         status: 'published',
         createdAt: toIso(data.createdAt),
         updatedAt: toIso(data.updatedAt),
-        questions: Array.isArray(data.questions) ? data.questions : [],
-      } as MissionDefinition;
+        questions: rawQuestions.map((qItem) =>
+          toPublicQuestion((qItem || {}) as Record<string, unknown>),
+        ),
+      } as PublicMissionDefinition;
     });
   } catch (error) {
     handleFirestoreError(error, OperationType.LIST, path);
   }
 }
 
-export async function fetchTeacherMissions(teacherUid: string): Promise<MissionDefinition[]> {
-  const path = 'missions';
-  try {
-    const q = query(collection(db, path), where('teacherId', '==', teacherUid));
-    const snapshot = await getDocs(q);
-    const missions = await Promise.all(
-      snapshot.docs.map(async (docSnap) => {
-        const data = docSnap.data();
-        let privateAnswers: Record<string, { correctOptionId?: string; explanation?: string }> = {};
-        try {
-          const keySnap = await getDoc(doc(db, 'missions', docSnap.id, 'private', 'answerKey'));
-          if (keySnap.exists()) {
-            privateAnswers = (keySnap.data().answers || {}) as typeof privateAnswers;
-          }
-        } catch {
-          // Ignore if no private key doc exists yet
-        }
-
-        const rawQuestions = Array.isArray(data.questions) ? data.questions : [];
-        const hydratedQuestions = rawQuestions.map((question: Record<string, unknown>) => {
-          const qId = String(question.id || '');
-          const secret = privateAnswers[qId] || {};
-          return {
-            ...question,
-            correctOptionId: String(secret.correctOptionId || question.correctOptionId || 'a'),
-            explanation: String(secret.explanation || question.explanation || ''),
-          };
-        });
-
-        return {
-          id: docSnap.id,
-          worldId: (data.worldId as SubjectWorldId) || 'english',
-          title: String(data.title || ''),
-          subject: String(data.subject || ''),
-          topic: String(data.topic || ''),
-          gradeLevel: typeof data.gradeLevel === 'string' ? data.gradeLevel : undefined,
-          difficulty: data.difficulty,
-          summary: String(data.summary || ''),
-          estimatedMinutes: Number(data.estimatedMinutes || 3),
-          objectives: Array.isArray(data.objectives) ? data.objectives : [],
-          xpPerCorrect: Number(data.xpPerCorrect || 30),
-          xpPerIncorrect: Number(data.xpPerIncorrect || 5),
-          imageSrc: String(
-            data.imageSrc || '/src/assets/images/world_english_grammar_1794854621776.jpg',
-          ),
-          imageAlt: String(data.imageAlt || 'QUESTLAB Mission'),
-          authorType: data.authorType || 'ai_generated',
-          teacherId: String(data.teacherId || teacherUid),
-          status: data.status === 'published' ? 'published' : 'draft',
-          createdAt: toIso(data.createdAt),
-          updatedAt: toIso(data.updatedAt),
-          questions: hydratedQuestions,
-        } as MissionDefinition;
-      }),
-    );
-
-    return missions.sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
-  } catch (error) {
-    handleFirestoreError(error, OperationType.LIST, path);
-  }
+export async function fetchTeacherMissions(_teacherUid: string): Promise<MissionDefinition[]> {
+  return fetchTeacherMissionsFromServer();
 }
 
 export async function saveTeacherMission(
   mission: MissionDefinition,
-  teacherUid: string,
+  _teacherUid: string,
   status: 'draft' | 'published',
 ): Promise<MissionDefinition> {
-  const missionRef = doc(db, 'missions', mission.id);
-  const privateKeyRef = doc(db, 'missions', mission.id, 'private', 'answerKey');
-  const existing = await getDoc(missionRef);
-
-  const sanitized = stripMissionPrivateAnswers(mission);
-  const answersMap: Record<string, { correctOptionId: string; explanation: string }> = {};
-  for (const q of mission.questions) {
-    answersMap[q.id] = {
-      correctOptionId: q.correctOptionId,
-      explanation: q.explanation,
-    };
-  }
-
-  const missionPath = `missions/${mission.id}`;
-  try {
-    if (existing.exists()) {
-      await updateDoc(missionRef, {
-        ...sanitized,
-        status,
-        updatedAt: serverTimestamp(),
-      });
-    } else {
-      await setDoc(missionRef, {
-        ...sanitized,
-        teacherId: teacherUid,
-        status,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
-    }
-
-    await setDoc(privateKeyRef, {
-      missionId: mission.id,
-      teacherId: teacherUid,
-      answers: answersMap,
-      updatedAt: serverTimestamp(),
-    });
-  } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, missionPath);
-  }
-
-  return {
-    ...mission,
-    teacherId: teacherUid,
-    status,
-    updatedAt: new Date().toISOString(),
-  };
+  return saveTeacherMissionOnServer(mission, status);
 }
 
 export async function updateMissionPublicationStatus(
   missionId: string,
   status: 'draft' | 'published',
 ): Promise<void> {
-  const path = `missions/${missionId}`;
-  try {
-    await updateDoc(doc(db, 'missions', missionId), {
-      status,
-      updatedAt: serverTimestamp(),
-    });
-  } catch (error) {
-    handleFirestoreError(error, OperationType.UPDATE, path);
-  }
+  return updateMissionStatusOnServer(missionId, status);
 }
 
 export async function deleteTeacherMission(missionId: string): Promise<void> {
-  const path = `missions/${missionId}`;
-  try {
-    await deleteDoc(doc(db, 'missions', missionId, 'private', 'answerKey')).catch(() => undefined);
-    await deleteDoc(doc(db, 'missions', missionId));
-  } catch (error) {
-    handleFirestoreError(error, OperationType.DELETE, path);
-  }
+  return deleteTeacherMissionOnServer(missionId);
 }
 
 // --- Classes & Enrollments ---
@@ -442,10 +319,10 @@ export async function removeEnrollment(enrollmentId: string): Promise<void> {
   }
 }
 
-// --- Assignments & Submissions ---
+// --- Assignments & Submissions (Reads + Teacher Assignment Creation Only) ---
 
 export async function assignMissionToStudents(params: {
-  mission: MissionDefinition;
+  mission: PublicMissionDefinition | MissionDefinition;
   classRoom: ClassRoom;
   studentEnrollments: ClassEnrollment[];
   teacherUid: string;
@@ -548,78 +425,6 @@ export async function fetchStudentAssignments(studentUid: string): Promise<Missi
   } catch (error) {
     handleFirestoreError(error, OperationType.LIST, path);
   }
-}
-
-export async function markAssignmentCompleted(assignmentId: string): Promise<void> {
-  const path = `assignments/${assignmentId}`;
-  try {
-    await updateDoc(doc(db, 'assignments', assignmentId), {
-      status: 'completed',
-      updatedAt: serverTimestamp(),
-    });
-  } catch (error) {
-    handleFirestoreError(error, OperationType.UPDATE, path);
-  }
-}
-
-export async function recordMissionSubmission(params: {
-  student: UserProfile;
-  mission: MissionDefinition;
-  teacherId?: string;
-  correctCount: number;
-  totalQuestions: number;
-  xpEarnedInRun: number;
-  xpAddedToProfile: number;
-  bestStreakInRun: number;
-}): Promise<MissionSubmission> {
-  const submissionId = `${params.student.uid}_${params.mission.id}_${Date.now().toString(36)}`.slice(
-    0,
-    128,
-  );
-  const path = `submissions/${submissionId}`;
-
-  const docPayload: Record<string, unknown> = {
-    id: submissionId,
-    studentUid: params.student.uid,
-    studentName: params.student.displayName.slice(0, 80),
-    missionId: params.mission.id,
-    missionTitle: params.mission.title.slice(0, 120),
-    worldId: params.mission.worldId,
-    topic: params.mission.topic.slice(0, 120),
-    correctCount: params.correctCount,
-    totalQuestions: params.totalQuestions,
-    xpEarnedInRun: params.xpEarnedInRun,
-    xpAddedToProfile: params.xpAddedToProfile,
-    bestStreakInRun: params.bestStreakInRun,
-    completedAt: serverTimestamp(),
-  };
-
-  if (params.teacherId && /^[a-zA-Z0-9_-]+$/.test(params.teacherId)) {
-    docPayload.teacherId = params.teacherId;
-  }
-
-  try {
-    await setDoc(doc(db, 'submissions', submissionId), docPayload);
-  } catch (error) {
-    handleFirestoreError(error, OperationType.CREATE, path);
-  }
-
-  return {
-    id: submissionId,
-    studentUid: params.student.uid,
-    studentName: params.student.displayName,
-    missionId: params.mission.id,
-    missionTitle: params.mission.title,
-    worldId: params.mission.worldId,
-    topic: params.mission.topic,
-    teacherId: params.teacherId,
-    correctCount: params.correctCount,
-    totalQuestions: params.totalQuestions,
-    xpEarnedInRun: params.xpEarnedInRun,
-    xpAddedToProfile: params.xpAddedToProfile,
-    bestStreakInRun: params.bestStreakInRun,
-    completedAt: new Date().toISOString(),
-  };
 }
 
 export async function fetchStudentSubmissions(studentUid: string): Promise<MissionSubmission[]> {

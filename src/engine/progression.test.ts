@@ -1,15 +1,26 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { MISSIONS } from '../data/missions';
+import { MISSIONS } from '../data/missions.ts';
+import { getCuratedMission } from '../../server/curatedKeys.ts';
 import {
   calculateLevelInfo,
   commitMissionCompletion,
   createInitialProgressState,
   evaluateQuestionAnswer,
-} from './progression';
-import type { QuestionResultEntry } from '../types/questlab';
+} from './progression.ts';
+import type { QuestionResultEntry } from '../types/questlab.ts';
 
-const grammarVault = MISSIONS[0];
+const publicGrammarVault = MISSIONS[0];
+const serverGrammarVault = getCuratedMission('grammar-vault-01')!;
+
+test('client-side MISSIONS contain no correctOptionId or explanation exposure', () => {
+  for (const mission of MISSIONS) {
+    for (const q of mission.questions) {
+      assert.equal('correctOptionId' in q, false);
+      assert.equal('explanation' in q, false);
+    }
+  }
+});
 
 test('calculateLevelInfo handles XP boundaries accurately', () => {
   const lv1Start = calculateLevelInfo(0);
@@ -30,16 +41,22 @@ test('calculateLevelInfo handles XP boundaries accurately', () => {
   assert.equal(lv2.rankTitle, 'Orbital Navigator');
 });
 
-test('evaluateQuestionAnswer awards 30 XP for correct and 5 XP for incorrect', () => {
-  const q1 = grammarVault.questions[0];
+test('evaluateQuestionAnswer awards 30 XP for correct and 5 XP for incorrect using server key', () => {
+  const q1 = serverGrammarVault.questions[0];
 
-  const correctOutcome = evaluateQuestionAnswer(q1, q1.correctOptionId, grammarVault, 1, 1);
+  const correctOutcome = evaluateQuestionAnswer(
+    q1,
+    q1.correctOptionId,
+    serverGrammarVault,
+    1,
+    1,
+  );
   assert.equal(correctOutcome.isCorrect, true);
   assert.equal(correctOutcome.xpEarned, 30);
   assert.equal(correctOutcome.nextRunStreak, 2);
   assert.equal(correctOutcome.nextBestRunStreak, 2);
 
-  const wrongOutcome = evaluateQuestionAnswer(q1, 'b', grammarVault, 2, 2);
+  const wrongOutcome = evaluateQuestionAnswer(q1, 'b', serverGrammarVault, 2, 2);
   assert.equal(wrongOutcome.isCorrect, false);
   assert.equal(wrongOutcome.xpEarned, 5);
   assert.equal(wrongOutcome.nextRunStreak, 0);
@@ -58,7 +75,7 @@ test('commitMissionCompletion prevents duplicate XP rewards on replay while allo
 
   const firstCommit = commitMissionCompletion(
     initial,
-    grammarVault,
+    publicGrammarVault,
     partialRun,
     '2026-11-16T10:00:00.000Z',
   );
@@ -76,7 +93,7 @@ test('commitMissionCompletion prevents duplicate XP rewards on replay while allo
 
   const secondCommit = commitMissionCompletion(
     firstCommit.nextState,
-    grammarVault,
+    publicGrammarVault,
     perfectRun,
     '2026-11-16T10:05:00.000Z',
   );
@@ -91,7 +108,7 @@ test('commitMissionCompletion prevents duplicate XP rewards on replay while allo
   // Attempt 3: Replay with perfect 3/3 again -> adds 0 duplicate XP
   const thirdCommit = commitMissionCompletion(
     secondCommit.nextState,
-    grammarVault,
+    publicGrammarVault,
     perfectRun,
     '2026-11-16T10:10:00.000Z',
   );

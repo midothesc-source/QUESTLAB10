@@ -5,6 +5,7 @@ import type {
   MissionDefinition,
   MissionQuestion,
   MissionRunSummary,
+  PublicMissionDefinition,
   QuestionResultEntry,
 } from '../types/questlab';
 
@@ -74,7 +75,7 @@ export interface EvaluatedQuestionOutcome {
 export function evaluateQuestionAnswer(
   question: MissionQuestion,
   selectedOptionId: string,
-  mission: MissionDefinition,
+  mission: PublicMissionDefinition | MissionDefinition,
   currentRunStreak: number,
   bestRunStreak: number,
 ): EvaluatedQuestionOutcome {
@@ -98,7 +99,7 @@ export interface CommitMissionResult {
 
 export function commitMissionCompletion(
   currentState: LearnerProgressState,
-  mission: MissionDefinition,
+  mission: PublicMissionDefinition | MissionDefinition,
   questionResults: QuestionResultEntry[],
   completedAtIso: string = new Date().toISOString(),
 ): CommitMissionResult {

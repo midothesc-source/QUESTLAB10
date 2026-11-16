@@ -25,6 +25,16 @@ function loadAppletConfig(): FirebaseAppletConfig {
 export const firebaseProjectConfig = loadAppletConfig();
 export const BOOTSTRAPPED_ADMIN_EMAIL = 'midothesc@gmail.com';
 
+export class HttpError extends Error {
+  readonly statusCode: number;
+
+  constructor(statusCode: number, message: string) {
+    super(message);
+    this.name = 'HttpError';
+    this.statusCode = statusCode;
+  }
+}
+
 let adminInitialized = false;
 let adminInitError: string | null = null;
 
@@ -32,6 +42,7 @@ function ensureAdminInitialized(): boolean {
   if (adminInitialized) return true;
   if (getApps().length > 0) {
     adminInitialized = true;
+    adminInitError = null;
     return true;
   }
 
@@ -80,8 +91,17 @@ export interface VerifiedFirebaseUser {
   uid: string;
   email: string;
   emailVerified: boolean;
+  displayName?: string;
   roleClaim?: string;
   rawToken: string;
+}
+
+export interface VerifyBearerOptions {
+  /**
+   * When true (default for authoritative/privileged endpoints), require Firebase Admin SDK
+   * so checkRevoked=true verification is guaranteed and fail closed with 503 if unavailable.
+   */
+  requireAdminSdk?: boolean;
 }
 
 interface CertCache {
@@ -100,7 +120,7 @@ async function fetchGooglePublicCerts(): Promise<Record<string, string>> {
     'https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com',
   );
   if (!response.ok) {
-    throw new Error(`Failed to fetch Firebase public keys (${response.status})`);
+    throw new HttpError(503, `Failed to fetch Firebase public keys (${response.status}).`);
   }
 
   const cacheControl = response.headers.get('cache-control') || '';
@@ -123,77 +143,101 @@ function base64UrlDecode(input: string): Buffer {
 
 export async function verifyFirebaseBearerToken(
   authHeader: string | undefined,
+  options: VerifyBearerOptions = { requireAdminSdk: true },
 ): Promise<VerifiedFirebaseUser> {
+  const requireAdminSdk = options.requireAdminSdk ?? true;
+  const adminAuth = getAdminAuth();
+
+  if (requireAdminSdk && !adminAuth) {
+    throw new HttpError(
+      503,
+      'Authoritative Firebase Admin SDK is not configured on the server.',
+    );
+  }
+
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    throw new Error('Missing or invalid Authorization Bearer token.');
+    throw new HttpError(401, 'Missing or invalid Authorization Bearer token.');
   }
 
   const idToken = authHeader.slice('Bearer '.length).trim();
   if (!idToken) {
-    throw new Error('Empty Firebase ID token.');
+    throw new HttpError(401, 'Empty Firebase ID token.');
   }
 
-  const adminAuth = getAdminAuth();
   if (adminAuth) {
-    const decoded = await adminAuth.verifyIdToken(idToken);
-    return {
-      uid: decoded.uid,
-      email: decoded.email || '',
-      emailVerified: Boolean(decoded.email_verified),
-      roleClaim: typeof decoded.role === 'string' ? decoded.role : undefined,
-      rawToken: idToken,
-    };
+    try {
+      // Enforce revocation checking (checkRevoked = true)
+      const decoded = await adminAuth.verifyIdToken(idToken, true);
+      return {
+        uid: decoded.uid,
+        email: decoded.email || '',
+        emailVerified: Boolean(decoded.email_verified),
+        displayName: typeof decoded.name === 'string' ? decoded.name : undefined,
+        roleClaim: typeof decoded.role === 'string' ? decoded.role : undefined,
+        rawToken: idToken,
+      };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Invalid or revoked Firebase ID token.';
+      throw new HttpError(401, msg);
+    }
   }
 
-  // Cryptographic JWT verification against Google's Firebase X.509 certificates
+  // Non-production fallback ONLY when explicitly opted out of requireAdminSdk (e.g. AI preview)
+  if (process.env.NODE_ENV === 'production') {
+    throw new HttpError(503, 'Firebase Admin SDK is required in production.');
+  }
+
   const parts = idToken.split('.');
   if (parts.length !== 3) {
-    throw new Error('Malformed Firebase ID token.');
+    throw new HttpError(401, 'Malformed Firebase ID token.');
   }
 
   const [headerB64, payloadB64, signatureB64] = parts;
-  const header = JSON.parse(base64UrlDecode(headerB64).toString('utf8')) as {
-    alg?: string;
-    kid?: string;
-  };
-  const payload = JSON.parse(base64UrlDecode(payloadB64).toString('utf8')) as {
+  let header: { alg?: string; kid?: string };
+  let payload: {
     aud?: string;
     iss?: string;
     sub?: string;
     exp?: number;
-    iat?: number;
     email?: string;
     email_verified?: boolean;
+    name?: string;
     role?: string;
   };
+  try {
+    header = JSON.parse(base64UrlDecode(headerB64).toString('utf8')) as typeof header;
+    payload = JSON.parse(base64UrlDecode(payloadB64).toString('utf8')) as typeof payload;
+  } catch {
+    throw new HttpError(401, 'Malformed Firebase token payload.');
+  }
 
   if (header.alg !== 'RS256' || !header.kid) {
-    throw new Error('Unsupported Firebase token signing algorithm.');
+    throw new HttpError(401, 'Unsupported Firebase token signing algorithm.');
   }
 
   const projectId = firebaseProjectConfig.projectId;
   if (!projectId) {
-    throw new Error('Firebase projectId is not configured.');
+    throw new HttpError(503, 'Firebase projectId is not configured.');
   }
 
   const nowSeconds = Math.floor(Date.now() / 1000);
   if (payload.aud !== projectId) {
-    throw new Error('Firebase token audience mismatch.');
+    throw new HttpError(401, 'Firebase token audience mismatch.');
   }
   if (payload.iss !== `https://securetoken.google.com/${projectId}`) {
-    throw new Error('Firebase token issuer mismatch.');
+    throw new HttpError(401, 'Firebase token issuer mismatch.');
   }
   if (!payload.sub || typeof payload.sub !== 'string') {
-    throw new Error('Firebase token missing subject UID.');
+    throw new HttpError(401, 'Firebase token missing subject UID.');
   }
   if (!payload.exp || payload.exp <= nowSeconds) {
-    throw new Error('Firebase token has expired.');
+    throw new HttpError(401, 'Firebase token has expired.');
   }
 
   const certs = await fetchGooglePublicCerts();
   const certPem = certs[header.kid];
   if (!certPem) {
-    throw new Error('Unknown Firebase signing key ID.');
+    throw new HttpError(401, 'Unknown Firebase signing key ID.');
   }
 
   const verifier = crypto.createVerify('RSA-SHA256');
@@ -201,51 +245,84 @@ export async function verifyFirebaseBearerToken(
   verifier.end();
   const isSignatureValid = verifier.verify(certPem, base64UrlDecode(signatureB64));
   if (!isSignatureValid) {
-    throw new Error('Invalid Firebase token signature.');
+    throw new HttpError(401, 'Invalid Firebase token signature.');
   }
 
   return {
     uid: payload.sub,
     email: payload.email || '',
     emailVerified: Boolean(payload.email_verified),
+    displayName: typeof payload.name === 'string' ? payload.name : undefined,
     roleClaim: typeof payload.role === 'string' ? payload.role : undefined,
     rawToken: idToken,
   };
 }
 
-export async function verifyTeacherOrAdmin(user: VerifiedFirebaseUser): Promise<boolean> {
-  if (user.roleClaim === 'teacher' || user.roleClaim === 'admin') {
-    return true;
-  }
+export interface ServerRoleDb {
+  getDoc(docPath: string): Promise<{ exists: boolean; data: Record<string, unknown> | undefined }>;
+}
 
-  if (user.emailVerified && user.email.toLowerCase() === BOOTSTRAPPED_ADMIN_EMAIL.toLowerCase()) {
-    return true;
-  }
+/**
+ * Authoritative role check:
+ * 1. Verified custom token claims ('teacher' or 'admin')
+ * 2. Verified bootstrapped admin email
+ * 3. Server-verified /teachers/{uid} or /admins/{uid} registry documents
+ * Never trusts mutable /users/{uid}.role!
+ */
+export async function resolveUserRoles(
+  user: VerifiedFirebaseUser,
+  roleDb?: ServerRoleDb | null,
+): Promise<{ isTeacher: boolean; isAdmin: boolean }> {
+  const isBootstrapAdmin =
+    user.emailVerified && user.email.toLowerCase() === BOOTSTRAPPED_ADMIN_EMAIL.toLowerCase();
 
-  const adminDb = getAdminDb();
-  if (adminDb) {
-    const [teacherDoc, adminDoc, userDoc] = await Promise.all([
-      adminDb.doc(`teachers/${user.uid}`).get(),
-      adminDb.doc(`admins/${user.uid}`).get(),
-      adminDb.doc(`users/${user.uid}`).get(),
+  let isAdmin = isBootstrapAdmin || user.roleClaim === 'admin';
+  let isTeacher = isAdmin || user.roleClaim === 'teacher';
+
+  if (roleDb) {
+    const [teacherDoc, adminDoc] = await Promise.all([
+      roleDb.getDoc(`teachers/${user.uid}`),
+      roleDb.getDoc(`admins/${user.uid}`),
     ]);
-    if (teacherDoc.exists || adminDoc.exists || userDoc.data()?.role === 'teacher') {
-      return true;
+    if (adminDoc.exists) {
+      isAdmin = true;
+      isTeacher = true;
     }
+    if (teacherDoc.exists) {
+      isTeacher = true;
+    }
+  }
+
+  return { isTeacher, isAdmin };
+}
+
+export async function verifyTeacherOrAdmin(
+  user: VerifiedFirebaseUser,
+  roleDb?: ServerRoleDb | null,
+): Promise<boolean> {
+  const dbAdapter: ServerRoleDb | null =
+    roleDb !== undefined
+      ? roleDb
+      : (() => {
+          const db = getAdminDb();
+          if (!db) return null;
+          return {
+            async getDoc(docPath: string) {
+              const snap = await db.doc(docPath).get();
+              return { exists: snap.exists, data: snap.data() as Record<string, unknown> | undefined };
+            },
+          };
+        })();
+
+  const roles = await resolveUserRoles(user, dbAdapter);
+  return roles.isTeacher;
+}
+
+export function constantTimeSecretEquals(expected: string | undefined, provided: string | undefined): boolean {
+  if (!expected || !provided || expected.length === 0 || provided.length === 0) {
     return false;
   }
-
-  // Fallback check via Firestore REST API using caller's own verified Firebase ID token
-  const projectId = firebaseProjectConfig.projectId;
-  const dbId = firebaseProjectConfig.firestoreDatabaseId || '(default)';
-  if (!projectId) return false;
-
-  const teacherUrl = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(
-    projectId,
-  )}/databases/${encodeURIComponent(dbId)}/documents/teachers/${encodeURIComponent(user.uid)}`;
-
-  const res = await fetch(teacherUrl, {
-    headers: { Authorization: `Bearer ${user.rawToken}` },
-  });
-  return res.ok;
+  const expectedDigest = crypto.createHash('sha256').update(expected, 'utf8').digest();
+  const providedDigest = crypto.createHash('sha256').update(provided, 'utf8').digest();
+  return crypto.timingSafeEqual(expectedDigest, providedDigest);
 }

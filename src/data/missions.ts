@@ -1,6 +1,11 @@
-import type { AchievementDefinition, MissionDefinition } from '../types/questlab';
+import type { AchievementDefinition, PublicMissionDefinition } from '../types/questlab';
 
-export const MISSIONS: MissionDefinition[] = [
+/**
+ * Student-facing curated mission definitions.
+ * Authoritative answer keys and explanations live strictly on the server (server/curatedKeys.ts)
+ * and are never bundled into frontend JavaScript assets.
+ */
+export const MISSIONS: PublicMissionDefinition[] = [
   {
     id: 'grammar-vault-01',
     worldId: 'english',
@@ -13,13 +18,14 @@ export const MISSIONS: MissionDefinition[] = [
     objectives: [
       'Identify prepositional phrases operating as adjective modifiers on nouns.',
       'Distinguish adverb prepositional phrases that describe how, when, or where a verb occurs.',
-      'Verify grammatical function using targeted modifier questions before locking your answer.',
+      'Verify grammatical function using targeted modifier questions before submitting your attempt.',
     ],
     xpPerCorrect: 30,
     xpPerIncorrect: 5,
     imageSrc: '/src/assets/images/world_english_grammar_1794854621776.jpg',
     imageAlt: 'Interior of The Grammar Vault with luminous holographic syntax rings',
     authorType: 'curated',
+    status: 'published',
     questions: [
       {
         id: 'gv-q1',
@@ -43,10 +49,7 @@ export const MISSIONS: MissionDefinition[] = [
             text: 'Noun phrase acting as the subject',
           },
         ],
-        correctOptionId: 'a',
         hint: "Ask yourself what 'on the table' specifies: which book is being discussed, or how the action of belonging happens?",
-        explanation:
-          "'on the table' answers 'Which book?' and directly describes the noun 'book'. Because it modifies a noun rather than a verb, it functions as an adjective prepositional phrase.",
       },
       {
         id: 'gv-q2',
@@ -70,10 +73,7 @@ export const MISSIONS: MissionDefinition[] = [
             text: 'Direct object receiving the action',
           },
         ],
-        correctOptionId: 'b',
         hint: "Test whether 'through the hallway' describes the students themselves or tells where they walked.",
-        explanation:
-          "'through the hallway' answers 'Where did the students walk?' and modifies the verb 'walked'. Because it modifies a verb to express path or location of action, it functions as an adverb prepositional phrase.",
       },
       {
         id: 'gv-q3',
@@ -97,10 +97,7 @@ export const MISSIONS: MissionDefinition[] = [
             text: 'Adverb phrase modifying "red"',
           },
         ],
-        correctOptionId: 'b',
         hint: "Check whether 'with the red backpack' describes how she smiled or identifies which girl smiled.",
-        explanation:
-          "'with the red backpack' answers 'Which girl?' and gives identifying detail about the noun 'girl'. Therefore, it functions as an adjective prepositional phrase.",
       },
     ],
   },
@@ -124,6 +121,6 @@ export const ACHIEVEMENTS: AchievementDefinition[] = [
   },
 ];
 
-export function getMissionById(missionId: string): MissionDefinition | undefined {
+export function getMissionById(missionId: string): PublicMissionDefinition | undefined {
   return MISSIONS.find((mission) => mission.id === missionId);
 }

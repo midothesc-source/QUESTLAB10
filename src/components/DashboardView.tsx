@@ -23,8 +23,8 @@ import type {
   ClassEnrollment,
   LearnerProgressState,
   MissionAssignment,
-  MissionDefinition,
   MissionSubmission,
+  PublicMissionDefinition,
   UserProfile,
 } from '../types/questlab';
 import { ResilientImage } from './ResilientImage';
@@ -32,12 +32,12 @@ import { ResilientImage } from './ResilientImage';
 interface DashboardViewProps {
   progress: LearnerProgressState;
   profile: UserProfile | null;
-  missions: MissionDefinition[];
+  missions: PublicMissionDefinition[];
   assignments: MissionAssignment[];
   submissions: MissionSubmission[];
   enrollments: ClassEnrollment[];
   onOpenWorlds: () => void;
-  onOpenMissionBriefing: (missionId: string) => void;
+  onOpenMissionBriefing: (missionId: string, assignmentId?: string) => void;
   onOpenAuth: () => void;
   onOpenProfile: () => void;
   onOpenTeacherPortal: () => void;
@@ -215,8 +215,13 @@ export function DashboardView({
             {progress.totalXp} XP
           </p>
           <p className="mt-1 text-xs text-slate-400">
-            {profile ? 'Synced with Cloud Firestore' : 'Persisted locally across sessions'}
+            {profile ? 'Server-verified Cloud XP' : 'Local guest practice XP'}
           </p>
+          {profile && progress.guestLegacySummary && progress.guestLegacySummary.guestXpEarned > 0 && (
+            <p className="mt-1 text-[11px] text-slate-500">
+              Prior guest practice: {progress.guestLegacySummary.guestXpEarned} XP
+            </p>
+          )}
         </div>
 
         <div className="ql-panel rounded-xl p-5">
@@ -305,7 +310,12 @@ export function DashboardView({
                         </span>
                         <button
                           type="button"
-                          onClick={() => onOpenMissionBriefing(assignment.missionId)}
+                          onClick={() =>
+                            onOpenMissionBriefing(
+                              assignment.missionId,
+                              isDone ? undefined : assignment.id,
+                            )
+                          }
                           className="rounded-lg bg-[#55D9F5] px-3.5 py-1.5 text-xs font-semibold text-[#06111D] hover:bg-[#7DE4FA]"
                         >
                           {isDone ? 'Replay' : 'Launch'}

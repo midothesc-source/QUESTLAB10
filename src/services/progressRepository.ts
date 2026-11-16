@@ -1,8 +1,12 @@
-import { doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
+import { doc, getDoc } from 'firebase/firestore';
 import { createInitialProgressState, SCHEMA_VERSION } from '../engine/progression';
 import type { LearnerProgressState, ProgressRepository } from '../types/questlab';
-import { db, handleFirestoreError, OperationType } from './firebase';
-import { mergeGuestProgressIntoCloud } from './guestMigration';
+import {
+  fetchServerProgress,
+  preserveGuestPracticeOnServerApi,
+  resetServerProgressOnServer,
+} from './apiClient';
+import { db } from './firebase';
 
 const GUEST_STORAGE_KEY = 'questlab_learner_progress_v1';
 const CLOUD_CACHE_PREFIX = 'questlab_cloud_cache_v1_';
@@ -26,7 +30,7 @@ function isValidProgressState(value: unknown): value is LearnerProgressState {
 }
 
 /**
- * LocalStorage implementation for Guest Mode & local offline caching.
+ * LocalStorage implementation for Guest Mode & local offline read caching.
  */
 export class LocalStorageProgressRepository implements ProgressRepository {
   private readonly storageKey: string;
@@ -104,8 +108,9 @@ export class LocalStorageProgressRepository implements ProgressRepository {
 }
 
 /**
- * Cloud Firestore repository for authenticated learners with local caching
- * and race-condition-safe guest progress migration.
+ * Server-authoritative Cloud Firestore repository for authenticated learners.
+ * All writes to /users/{uid}/progress/current happen exclusively via server Admin SDK endpoints
+ * (/api/progress, /api/missions/grade, /api/progress/reset, /api/progress/migrate-guest).
  */
 export class FirestoreProgressRepository implements ProgressRepository {
   private readonly uid: string;
@@ -127,66 +132,54 @@ export class FirestoreProgressRepository implements ProgressRepository {
     return this.cache.load();
   }
 
-  async load(): Promise<LearnerProgressState> {
-    const path = `users/${this.uid}/progress/current`;
-    const ref = doc(db, 'users', this.uid, 'progress', 'current');
-
-    let cloudState: LearnerProgressState;
-    try {
-      const snap = await getDoc(ref);
-      if (snap.exists() && isValidProgressState(snap.data())) {
-        cloudState = snap.data() as LearnerProgressState;
-      } else {
-        cloudState = {
-          ...createInitialProgressState(this.displayName),
-          learnerId: this.uid,
-        };
-        await setDoc(ref, {
-          ...cloudState,
-          updatedAt: serverTimestamp(),
-        });
-      }
-    } catch (error) {
-      handleFirestoreError(error, OperationType.GET, path);
-    }
-
-    this.cache.save(cloudState);
-    return cloudState;
-  }
-
-  async save(state: LearnerProgressState): Promise<void> {
-    const path = `users/${this.uid}/progress/current`;
+  applyAuthoritativeSnapshot(state: LearnerProgressState): void {
     const normalized: LearnerProgressState = {
       ...state,
       schemaVersion: SCHEMA_VERSION,
       learnerId: this.uid,
       displayName: (state.displayName || this.displayName).slice(0, 80),
     };
-
     this.cache.save(normalized);
+  }
 
+  async load(): Promise<LearnerProgressState> {
     try {
-      await setDoc(doc(db, 'users', this.uid, 'progress', 'current'), {
-        ...normalized,
-        updatedAt: serverTimestamp(),
-      });
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, path);
+      const serverProgress = await fetchServerProgress();
+      this.applyAuthoritativeSnapshot(serverProgress);
+      return serverProgress;
+    } catch (serverError) {
+      // Allow read-only Firestore fetch if progress document already exists
+      try {
+        const ref = doc(db, 'users', this.uid, 'progress', 'current');
+        const snap = await getDoc(ref);
+        if (snap.exists() && isValidProgressState(snap.data())) {
+          const readOnlyProgress = snap.data() as LearnerProgressState;
+          this.applyAuthoritativeSnapshot(readOnlyProgress);
+          return readOnlyProgress;
+        }
+      } catch {
+        // Surface original server error below
+      }
+      throw serverError;
     }
   }
 
+  /**
+   * Updates only local read cache. Official progress cannot be written from the client SDK.
+   */
+  save(state: LearnerProgressState): void {
+    this.applyAuthoritativeSnapshot(state);
+  }
+
   async reset(): Promise<LearnerProgressState> {
-    const fresh: LearnerProgressState = {
-      ...createInitialProgressState(this.displayName),
-      learnerId: this.uid,
-    };
-    await this.save(fresh);
+    const fresh = await resetServerProgressOnServer();
+    this.applyAuthoritativeSnapshot(fresh);
     return fresh;
   }
 
   /**
-   * Safely migrates guest progress into Firestore once (serialized to prevent race conditions),
-   * then clears guest localStorage upon confirmed cloud write.
+   * Safely preserves local guest practice summary inside `guestLegacySummary` on the server
+   * without trusting or promoting client XP into official account XP.
    */
   async migrateGuestProgress(
     guestRepo: LocalStorageProgressRepository,
@@ -199,11 +192,13 @@ export class FirestoreProgressRepository implements ProgressRepository {
     if (!this.activeMigrationPromise) {
       this.activeMigrationPromise = (async () => {
         const guestState = guestRepo.load();
-        const cloudState = await this.load();
-        const merged = mergeGuestProgressIntoCloud(guestState, cloudState);
-        await this.save(merged);
+        const serverState = await preserveGuestPracticeOnServerApi({
+          guestXpEarned: guestState.totalXp,
+          guestCompletedMissionIds: guestState.completedMissionIds,
+        });
+        this.applyAuthoritativeSnapshot(serverState);
         guestRepo.reset();
-        return merged;
+        return serverState;
       })().finally(() => {
         this.activeMigrationPromise = null;
       });
@@ -215,5 +210,4 @@ export class FirestoreProgressRepository implements ProgressRepository {
 }
 
 export const guestProgressRepository = new LocalStorageProgressRepository();
-// Preserve backward-compatible named export
 export const progressRepository = guestProgressRepository;

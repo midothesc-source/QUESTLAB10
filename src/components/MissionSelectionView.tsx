@@ -1,12 +1,12 @@
 import { useState } from 'react';
 import { ArrowRight, CheckCircle2, Lock, Sparkles, Unlock } from 'lucide-react';
 import { SUBJECT_WORLDS } from '../data/worlds';
-import type { LearnerProgressState, MissionDefinition } from '../types/questlab';
+import type { LearnerProgressState, PublicMissionDefinition } from '../types/questlab';
 import { ResilientImage } from './ResilientImage';
 
 interface MissionSelectionViewProps {
   progress: LearnerProgressState;
-  missions: MissionDefinition[];
+  missions: PublicMissionDefinition[];
   onSelectMission: (missionId: string) => void;
   onBackToDashboard: () => void;
 }

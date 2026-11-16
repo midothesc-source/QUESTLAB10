@@ -1,10 +1,12 @@
 import type {
   AIMissionGeneratorInput,
+  AuthoritativeGradeResponse,
+  GradeAttemptRequest,
   LearnerProgressState,
   MissionDefinition,
   MissionQuestion,
-  MissionRunSummary,
-  QuestionResultEntry,
+  PracticeGradeResponse,
+  SubmittedAnswerItem,
 } from '../types/questlab';
 import { getCurrentIdToken } from './authService';
 
@@ -16,6 +18,15 @@ async function authorizedFetch(url: string, options: RequestInit = {}): Promise<
     headers.set('Authorization', `Bearer ${token}`);
   }
   return fetch(url, { ...options, headers });
+}
+
+async function parseErrorMessage(res: Response, fallback: string): Promise<string> {
+  try {
+    const payload = (await res.json()) as { error?: string };
+    return payload.error || fallback;
+  } catch {
+    return fallback;
+  }
 }
 
 export interface ServerHealthStatus {
@@ -69,6 +80,75 @@ export async function regenerateQuestionViaAI(params: {
   return payload.question;
 }
 
+export async function saveTeacherMissionOnServer(
+  mission: MissionDefinition,
+  status: 'draft' | 'published',
+): Promise<MissionDefinition> {
+  const res = await authorizedFetch('/api/missions/save', {
+    method: 'POST',
+    body: JSON.stringify({ mission, status }),
+  });
+
+  const payload = (await res.json().catch(() => ({}))) as {
+    mission?: MissionDefinition;
+    error?: string;
+  };
+  if (!res.ok || !payload.mission) {
+    throw new Error(payload.error || 'Failed to save mission on server.');
+  }
+  return payload.mission;
+}
+
+export async function fetchTeacherMissionsFromServer(): Promise<MissionDefinition[]> {
+  const res = await authorizedFetch('/api/missions/teacher', { method: 'GET' });
+  const payload = (await res.json().catch(() => ({}))) as {
+    missions?: MissionDefinition[];
+    error?: string;
+  };
+  if (!res.ok || !Array.isArray(payload.missions)) {
+    throw new Error(payload.error || 'Failed to load teacher missions from server.');
+  }
+  return payload.missions;
+}
+
+export async function fetchTeacherMissionDraftFromServer(
+  missionId: string,
+): Promise<MissionDefinition> {
+  const res = await authorizedFetch(`/api/missions/${encodeURIComponent(missionId)}/teacher-draft`, {
+    method: 'GET',
+  });
+  const payload = (await res.json().catch(() => ({}))) as {
+    mission?: MissionDefinition;
+    error?: string;
+  };
+  if (!res.ok || !payload.mission) {
+    throw new Error(payload.error || 'Failed to load mission draft.');
+  }
+  return payload.mission;
+}
+
+export async function updateMissionStatusOnServer(
+  missionId: string,
+  status: 'draft' | 'published',
+): Promise<void> {
+  const res = await authorizedFetch(`/api/missions/${encodeURIComponent(missionId)}/status`, {
+    method: 'PATCH',
+    body: JSON.stringify({ status }),
+  });
+  if (!res.ok) {
+    throw new Error(await parseErrorMessage(res, 'Failed to update mission status.'));
+  }
+}
+
+export async function deleteTeacherMissionOnServer(missionId: string): Promise<void> {
+  const res = await authorizedFetch(`/api/missions/${encodeURIComponent(missionId)}`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) {
+    throw new Error(await parseErrorMessage(res, 'Failed to delete mission.'));
+  }
+}
+
 export async function registerMissionKeyOnServer(mission: MissionDefinition): Promise<void> {
   const res = await authorizedFetch('/api/missions/register-key', {
     method: 'POST',
@@ -76,57 +156,88 @@ export async function registerMissionKeyOnServer(mission: MissionDefinition): Pr
   });
 
   if (!res.ok) {
-    const payload = (await res.json().catch(() => ({}))) as { error?: string };
-    throw new Error(payload.error || 'Failed to register mission answer key on server.');
+    throw new Error(
+      await parseErrorMessage(res, 'Failed to register mission answer key on server.'),
+    );
   }
 }
 
-export interface SingleQuestionGradeResponse {
-  questionId: string;
-  selectedOptionId: string;
-  isCorrect: boolean;
-  xpEarned: number;
-  correctOptionId: string;
-  explanation: string;
-}
-
-export async function gradeSingleQuestionOnServer(
-  missionId: string,
-  questionId: string,
-  selectedOptionId: string,
-): Promise<SingleQuestionGradeResponse> {
-  const res = await authorizedFetch('/api/missions/grade-question', {
+export async function submitMissionAttemptOnServer(
+  request: GradeAttemptRequest,
+): Promise<AuthoritativeGradeResponse> {
+  const res = await authorizedFetch('/api/missions/grade', {
     method: 'POST',
-    body: JSON.stringify({ missionId, questionId, selectedOptionId }),
+    body: JSON.stringify(request),
   });
 
-  const payload = (await res.json()) as SingleQuestionGradeResponse & { error?: string };
-  if (!res.ok) {
-    throw new Error(payload.error || 'Server question validation failed.');
+  const payload = (await res.json().catch(() => ({}))) as AuthoritativeGradeResponse & {
+    error?: string;
+  };
+  if (!res.ok || !payload.summary || !payload.authoritativeProgress) {
+    throw new Error(
+      payload.error || 'Server grading could not be completed. Your answers have been preserved.',
+    );
   }
   return payload;
 }
 
-export interface ServerGradeResponse {
-  missionId: string;
-  teacherId: string;
-  questionResults: QuestionResultEntry[];
-  authoritativeProgress: LearnerProgressState | null;
-  summary: MissionRunSummary | null;
-}
-
-export async function gradeMissionOnServer(
+export async function submitGuestPracticeOnServer(
   missionId: string,
-  answers: Array<{ questionId: string; selectedOptionId: string }>,
-): Promise<ServerGradeResponse> {
-  const res = await authorizedFetch('/api/missions/grade', {
+  answers: SubmittedAnswerItem[],
+): Promise<PracticeGradeResponse> {
+  const res = await fetch('/api/missions/practice-grade', {
     method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ missionId, answers }),
   });
 
-  const payload = (await res.json()) as ServerGradeResponse & { error?: string };
-  if (!res.ok) {
-    throw new Error(payload.error || 'Server grading failed.');
+  const payload = (await res.json().catch(() => ({}))) as PracticeGradeResponse & {
+    error?: string;
+  };
+  if (!res.ok || !payload.summary) {
+    throw new Error(payload.error || 'Unable to evaluate guest practice attempt.');
   }
   return payload;
+}
+
+export async function fetchServerProgress(): Promise<LearnerProgressState> {
+  const res = await authorizedFetch('/api/progress', { method: 'GET' });
+  const payload = (await res.json().catch(() => ({}))) as {
+    progress?: LearnerProgressState;
+    error?: string;
+  };
+  if (!res.ok || !payload.progress) {
+    throw new Error(payload.error || 'Unable to load authoritative explorer progress.');
+  }
+  return payload.progress;
+}
+
+export async function resetServerProgressOnServer(): Promise<LearnerProgressState> {
+  const res = await authorizedFetch('/api/progress/reset', { method: 'POST' });
+  const payload = (await res.json().catch(() => ({}))) as {
+    progress?: LearnerProgressState;
+    error?: string;
+  };
+  if (!res.ok || !payload.progress) {
+    throw new Error(payload.error || 'Unable to reset explorer progress.');
+  }
+  return payload.progress;
+}
+
+export async function preserveGuestPracticeOnServerApi(params: {
+  guestXpEarned: number;
+  guestCompletedMissionIds: string[];
+}): Promise<LearnerProgressState> {
+  const res = await authorizedFetch('/api/progress/migrate-guest', {
+    method: 'POST',
+    body: JSON.stringify(params),
+  });
+  const payload = (await res.json().catch(() => ({}))) as {
+    progress?: LearnerProgressState;
+    error?: string;
+  };
+  if (!res.ok || !payload.progress) {
+    throw new Error(payload.error || 'Unable to preserve guest practice summary.');
+  }
+  return payload.progress;
 }

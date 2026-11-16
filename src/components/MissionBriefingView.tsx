@@ -1,9 +1,9 @@
 import { ArrowLeft, Clock, Play, Sparkles, Target, Trophy } from 'lucide-react';
-import type { MissionAttemptRecord, MissionDefinition } from '../types/questlab';
+import type { MissionAttemptRecord, PublicMissionDefinition } from '../types/questlab';
 import { ResilientImage } from './ResilientImage';
 
 interface MissionBriefingViewProps {
-  mission: MissionDefinition;
+  mission: PublicMissionDefinition;
   previousRecord?: MissionAttemptRecord;
   onStartMission: () => void;
   onBackToWorlds: () => void;
