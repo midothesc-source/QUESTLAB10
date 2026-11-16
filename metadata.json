@@ -1,0 +1,6 @@
+{
+  "name": "QUESTLAB",
+  "description": "An immersive futuristic educational universe where learners complete subject missions, earn experience points, and master concepts.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
